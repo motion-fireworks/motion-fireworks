@@ -381,46 +381,90 @@ function drawSky() {
   }
 
   colorMode(HSB);
-  drawMoon(width * 0.86, GROUND * 0.16, max(14, height * 0.032));
+  drawMoon(width * 0.86, GROUND * 0.16, max(16, height * 0.04));
   drawClouds();
 }
 
-// 달: 가장자리가 어두워지는 구(림 다크닝) + 바다(어두운 무늬) + 크레이터 질감 + 살짝 이지러진 위상
+// 달: 실제 보름달의 앞면 지도를 참고한 배치
+//  - 어두운 '바다'(현무암 평원): 왼쪽의 넓은 폭풍의 대양, 위쪽 비의 바다, 오른쪽의 고요의 바다·맑음의 바다,
+//    오른쪽 가장자리의 작은 위기의 바다, 아래쪽 구름의 바다 등
+//  - 밝은 고지대, 아래쪽 티코 크레이터에서 뻗는 밝은 줄무늬, 코페르니쿠스·아리스타르코스의 밝은 점
+const MARIA = [
+  // [x, y, 가로반경, 세로반경, 진하기]   (달 반지름 = 1, 오른쪽 +x, 아래쪽 +y)
+  [-0.58, -0.02, 0.30, 0.50, 0.9],   // 폭풍의 대양
+  [-0.38,  0.20, 0.22, 0.26, 0.8],
+  [-0.30, -0.42, 0.30, 0.24, 1.0],   // 비의 바다
+  [ 0.20, -0.36, 0.19, 0.18, 1.0],   // 맑음의 바다
+  [ 0.32, -0.08, 0.25, 0.22, 1.0],   // 고요의 바다
+  [ 0.03, -0.20, 0.13, 0.10, 0.8],   // 증기의 바다
+  [ 0.70, -0.28, 0.11, 0.09, 1.0],   // 위기의 바다
+  [ 0.52,  0.18, 0.15, 0.23, 0.85],  // 풍요의 바다
+  [ 0.33,  0.30, 0.12, 0.11, 0.85],  // 신주의 바다
+  [-0.16,  0.36, 0.20, 0.13, 0.75],  // 구름의 바다
+  [-0.48,  0.40, 0.10, 0.09, 0.9],   // 습기의 바다
+  [-0.08, -0.64, 0.42, 0.07, 0.3],   // 추위의 바다
+];
+const BRIGHT_SPOTS = [[-0.33, -0.12, 0.035], [-0.62, -0.30, 0.025], [-0.42, -0.05, 0.02]];
+const TYCHO = [-0.14, 0.70];
+
 function drawMoon(mx, my, mr) {
   let ctx = sky.drawingContext;
-  let g = ctx.createRadialGradient(mx, my, mr * 0.9, mx, my, mr * 9);   // 달빛 번짐
-  g.addColorStop(0, "rgba(205,215,235,0.28)");
-  g.addColorStop(0.25, "rgba(160,175,210,0.10)");
+  let g = ctx.createRadialGradient(mx, my, mr * 0.95, mx, my, mr * 8);   // 달빛 번짐
+  g.addColorStop(0, "rgba(210,220,240,0.30)");
+  g.addColorStop(0.2, "rgba(170,185,220,0.10)");
   g.addColorStop(1, "rgba(120,140,190,0)");
   ctx.fillStyle = g;
-  ctx.fillRect(mx - mr * 9, my - mr * 9, mr * 18, mr * 18);
+  ctx.fillRect(mx - mr * 8, my - mr * 8, mr * 16, mr * 16);
 
-  let d = ceil(mr * 2) + 2;
+  let SS = 4;                                   // 4배로 크게 그린 뒤 줄여서 매끈하게
+  let R = mr * SS, d = ceil(R * 2) + 4;
   let img = createImage(d, d);
   img.loadPixels();
-  let lx = 0.42, lz = 0.91;                       // 빛 방향 → 약간 이지러진 달
   for (let j = 0; j < d; j++) {
     for (let i = 0; i < d; i++) {
-      let nx = (i - d / 2) / mr, ny = (j - d / 2) / mr;
+      let nx = (i - d / 2) / R, ny = (j - d / 2) / R;
       let r = sqrt(nx * nx + ny * ny);
       let idx = 4 * (j * d + i);
-      if (r > 1.02) { img.pixels[idx + 3] = 0; continue; }
+      if (r > 1.01) { img.pixels[idx + 3] = 0; continue; }
+
+      // 바다: 타원들을 겹치고 노이즈로 가장자리를 불규칙하게
+      let wob = (noise(nx * 3 + 50, ny * 3 + 50) - 0.5) * 0.5 + (noise(nx * 9 + 7, ny * 9 + 7) - 0.5) * 0.15;
+      let keep = 1;
+      for (let m of MARIA) {
+        let dx = (nx - m[0]) / m[2], dy = (ny - m[1]) / m[3];
+        let dd = sqrt(dx * dx + dy * dy) + wob;
+        let t = constrain((dd - 0.8) / 0.25, 0, 1);
+        keep *= 1 - (1 - t * t * (3 - 2 * t)) * m[4];   // 부드럽게 겹쳐 하나로 이어지게
+      }
+      let mare = 1 - keep;
+      mare *= 0.85 + 0.3 * noise(nx * 10 + 5, ny * 10 + 5);   // 바다 안의 얼룩
+
+      // 티코에서 뻗는 밝은 줄무늬
+      let tx = nx - TYCHO[0], ty = ny - TYCHO[1];
+      let td = sqrt(tx * tx + ty * ty);
+      let ang = atan2(ty, tx);
+      let ray = pow(max(0, noise(ang * 3 + 200) - 0.45) * 2, 2) * max(0, 1 - td / 1.1);
+      let rays = ray * 0.35 + (td < 0.05 ? 0.5 : 0) + max(0, 0.12 - td) * 2;
+
+      let spots = 0;
+      for (let b of BRIGHT_SPOTS) {
+        let bd = dist(nx, ny, b[0], b[1]);
+        spots += max(0, 1 - bd / b[2]) * 0.4;
+      }
+
+      let tex = (noise(nx * 22 + 9, ny * 22 + 9) - 0.5) * 0.08;  // 고지대 잔 질감
       let nz = sqrt(max(0, 1 - r * r));
-      let lit = constrain((nx * lx + nz * lz + 0.08) * 3, 0, 1);      // 명암 경계
-      let limb = 0.62 + 0.38 * nz;                                     // 가장자리 어둡게
-      let maria = noise(nx * 1.6 + 30, ny * 1.6 + 30);                 // 큰 어두운 무늬(바다)
-      let mare = maria > 0.5 ? map(maria, 0.5, 0.65, 0, 0.32, true) : 0;
-      let crater = noise(nx * 9 + 70, ny * 9 + 70) * 0.18;             // 잔 질감
-      let v = limb * (1 - mare - crater * 0.6);
-      let k = lit * v + (1 - lit) * 0.04;                              // 어두운 쪽은 지구조 빛만 희미하게
-      img.pixels[idx]     = 238 * k;
-      img.pixels[idx + 1] = 234 * k;
-      img.pixels[idx + 2] = 222 * k;
-      img.pixels[idx + 3] = 255 * constrain((1.02 - r) * mr, 0, 1);  // 가장자리 부드럽게
+      let limb = 0.88 + 0.12 * pow(nz, 0.5);                   // 보름달은 가장자리가 조금만 어두움
+      let v = (1.0 - mare * 0.36 + tex + rays * (1 - mare * 0.5) + spots) * limb;
+      v = constrain(v, 0, 1.05);
+      img.pixels[idx]     = 242 * v - mare * 6;      // 바다는 살짝 푸른 회색
+      img.pixels[idx + 1] = 238 * v - mare * 4;
+      img.pixels[idx + 2] = 226 * v + mare * 2;
+      img.pixels[idx + 3] = 255 * constrain((1.01 - r) * R * 0.5, 0, 1);
     }
   }
   img.updatePixels();
-  sky.image(img, mx - d / 2, my - d / 2);
+  sky.image(img, mx - mr - 2 / SS, my - mr - 2 / SS, d / SS, d / SS);
 }
 
 // 구름: 노이즈로 만든 얇은 층운. 아래쪽은 도시 불빛을 받아 따뜻하게 물듦
