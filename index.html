@@ -6,6 +6,8 @@
   <title>손끝 불꽃놀이</title>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="city3d.js"></script>
   <style>
     html, body {
       margin: 0;
@@ -320,25 +322,8 @@ function makeLayers() {
   drawSky();
   sky.colorMode(HSB);
 
-  // 먼 빌딩숲 → 안개로 흐리게
-  row(H * 0.15, H * 0.32, 0.35, W * 0.025, W * 0.05);
-  haze(0.55);
-
-  // 중간 빌딩숲
-  row(H * 0.18, H * 0.38, 0.6, W * 0.035, W * 0.065);
-  haze(0.25);
-
-  // 여의도 랜드마크 (소실점에서 먼 것부터 그림)
-  building63(W * 0.12, W * 0.045, H * 0.62);
-  lgTwin(W * 0.27, W * 0.033, H * 0.34);
-  withFacade(210, 25, () => wedgeTower(W * 0.78, W * 0.05, GROUND - H * 0.62, GROUND - H * 0.56, 1, W * 0.04));   // FKI타워
-  withFacade(205, 30, () => wedgeTower(W * 0.35, W * 0.05, GROUND - H * 0.38, GROUND - H * 0.43, 1, W * 0.04));   // One IFC
-  parc1Tower(W * 0.665, W * 0.055, H * 0.65);                                                                      // 파크원 2동
-  withFacade(205, 30, () => wedgeTower(W * 0.42, W * 0.045, GROUND - H * 0.33, GROUND - H * 0.38, 1, W * 0.036)); // Two IFC
-  withFacade(205, 30, () => wedgeTower(W * 0.48, W * 0.045, GROUND - H * 0.66, GROUND - H * 0.71, 1, W * 0.036)); // Three IFC
-  parc1Tower(W * 0.575, W * 0.065, H * 0.8);                                                                       // 파크원 1동
-
-  assembly(W * 0.87, W * 0.22, H * 0.16);   // 국회의사당은 가장 앞쪽
+  // 여의도 3D 모델을 렌더링해서 배경에 그림 (city3d.js)
+  sky.drawingContext.drawImage(renderCity3D(width, height, GROUND), 0, 0);
 
   // 한강공원 나무숲
   treeLine();
