@@ -52,7 +52,32 @@ const FIRE_COLORS = [355, 130, 210, 285, 45];  // 사람별 기본색: 빨강, �
 // ===== 소리 설정 =====
 const FAST_MODE = false;  // true: 한 사람 전용 초고속 인식 (여러 명 인식은 꺼짐)
 let audioCtx = null;
-const SCALE = [523.25, 587.33, 659.25, 698.46, 783.99];   // 도 레 미 파 솔 (손을 높이 들수록 높은 음)
+const SCALE = [523.25, 587.33, 659.25, 698.46, 783.99];   // 도 레 미 파 솔 (SONG_MODE가 false일 때: 손 높이로 음 결정)
+
+// ===== 동요 모드: 불꽃이 터질 때마다 동요가 한 음씩 이어서 연주됨 =====
+const SONG_MODE = true;   // false로 바꾸면 손 높이에 따른 도레미파솔로 돌아감
+const N = { 도: 523.25, 레: 587.33, 미: 659.25, 파: 698.46, 솔: 783.99, 라: 880.0, 높은도: 1046.5 };
+const SONGS = [
+  // 반짝반짝 작은 별 (18세기 프랑스 민요, 저작권 없음)
+  "도 도 솔 솔 라 라 솔 파 파 미 미 레 레 도 솔 솔 파 파 미 미 레 솔 솔 파 파 미 미 레 도 도 솔 솔 라 라 솔 파 파 미 미 레 레 도",
+  // 나비야 (독일 민요 'Hänschen klein', 저작권 없음)
+  "솔 미 미 파 레 레 도 레 미 파 솔 솔 솔 솔 미 미 미 파 레 레 레 도 미 솔 솔 미 미 미 레 레 레 레 레 미 파 미 미 미 미 미 파 솔 솔 미 미 미 파 레 레 레 도 미 솔 솔 도"
+].map(t => t.split(" ").map(n => N[n]));
+const SONG_RESET = 4000;  // 이 시간(ms) 동안 아무도 안 터뜨리면 노래를 처음부터 다시
+let songIdx = 0, noteIdx = 0, lastNoteAt = 0;
+
+function nextSongNote() {
+  if (millis() - lastNoteAt > SONG_RESET) noteIdx = 0;
+  let song = SONGS[songIdx];
+  let f = song[noteIdx];
+  noteIdx++;
+  if (noteIdx >= song.length) {                // 한 곡이 끝나면 다음 곡으로
+    noteIdx = 0;
+    songIdx = (songIdx + 1) % SONGS.length;
+  }
+  lastNoteAt = millis();
+  return f;
+}
 const SPEED_MIN = 3;     // 이보다 빠르게 움직이면 펑 (낮출수록 잘 터짐)
 const COOLDOWN = 40;     // 다시 터지기까지 최소 간격(ms)
 const VOLUME = 0.15;
@@ -1049,9 +1074,13 @@ function handle(point, key, hue) {
       lastPop[key] = now;
       burst(x, y, hue);
 
-      let idx = floor(map(point.y, camH, 0, 0, SCALE.length));
-      idx = constrain(idx, 0, SCALE.length - 1);
-      playChime(SCALE[idx]);
+      if (SONG_MODE) {
+        playChime(nextSongNote());
+      } else {
+        let idx = floor(map(point.y, camH, 0, 0, SCALE.length));
+        idx = constrain(idx, 0, SCALE.length - 1);
+        playChime(SCALE[idx]);
+      }
     }
   }
   prevPts[key] = { x: point.x, y: point.y };
@@ -1062,7 +1091,7 @@ function playChime(freq) {
   let t = audioCtx.currentTime;
   let osc = audioCtx.createOscillator();
   let gain = audioCtx.createGain();
-  osc.type = "sine";
+  osc.type = "triangle";                         // 오르골처럼 맑고 부드러운 소리
   osc.frequency.setValueAtTime(freq, t);
   gain.gain.setValueAtTime(0.0001, t);
   gain.gain.exponentialRampToValueAtTime(VOLUME, t + 0.01);
