@@ -381,7 +381,7 @@ function drawSky() {
   }
 
   colorMode(HSB);
-  drawMoon(width * 0.86, GROUND * 0.16, max(16, height * 0.04));
+  drawMoon(width * 0.85, GROUND * 0.17, max(18, height * 0.05));
   drawClouds();
 }
 
@@ -418,7 +418,7 @@ function drawMoon(mx, my, mr) {
   ctx.fillStyle = g;
   ctx.fillRect(mx - mr * 8, my - mr * 8, mr * 16, mr * 16);
 
-  let SS = 4;                                   // 4배로 크게 그린 뒤 줄여서 매끈하게
+  let SS = 3;                                   // 3배로 크게 그린 뒤 줄여서 매끈하게
   let R = mr * SS, d = ceil(R * 2) + 4;
   let img = createImage(d, d);
   img.loadPixels();
@@ -467,14 +467,21 @@ function drawMoon(mx, my, mr) {
       let cr = (noise(nx * 60, ny * 60) > 0.72 ? 0.06 : 0);   // 표면 전체의 잔 반점
       for (let c of craters) {
         let cd = dist(nx, ny, c[0], c[1]) / c[2];
-        if (cd < 1.25) cr += cd < 0.8 ? -0.02 : 0.07 * (1 - abs(cd - 1) / 0.25);   // 밝은 점처럼 보이는 작은 크레이터
+        if (cd < 1.25) {
+          let side = (nx - c[0]) / c[2];            // 왼쪽 위에서 빛이 온다고 보고 안쪽 벽에 명암
+          cr += cd < 0.85 ? (-0.05 + side * 0.06) : 0.09 * (1 - abs(cd - 1) / 0.25);
+        }
       }
 
-      let tex = (fbm(nx * 18 + 9, ny * 18 + 9) - 0.5) * 0.14;  // 고지대 거친 질감
+      let tex = (fbm(nx * 18 + 9, ny * 18 + 9) - 0.5) * 0.18;  // 고지대 거친 질감
+      noiseDetail(2, 0.5);                                     // 울퉁불퉁한 지형의 음영(빛은 왼쪽 위에서)
+      let e = 0.025, hb = noise(nx * 9 + 50, ny * 9 + 50);
+      let bump = ((hb - noise((nx + e) * 9 + 50, ny * 9 + 50)) + (hb - noise(nx * 9 + 50, (ny + e) * 9 + 50))) * 1.1;
+      noiseDetail(4, 0.5);
       let nz = sqrt(max(0, 1 - r * r));
       let limb = 0.92 + 0.08 * pow(nz, 0.5);
-      let v = (0.9 - mare * 0.34 + tex * (1 - mare * 0.6) + cr * (1 - mare * 0.5) + rays * (1 - mare * 0.5) + spots) * limb;
-      v = constrain(v, 0, 1.05);
+      let v = (0.95 - mare * 0.45 + tex * (1 - mare * 0.5) + bump * (1 - mare * 0.6) + cr * (1 - mare * 0.4) + rays * (1 - mare * 0.5) + spots) * limb;
+      v = pow(constrain(v, 0, 1.1), 1.25);          // 명암 대비 강화
       img.pixels[idx]     = 228 * v;                     // 실제 달처럼 중성 회색
       img.pixels[idx + 1] = 228 * v;
       img.pixels[idx + 2] = 226 * v;
