@@ -160,13 +160,13 @@ function renderCity3D(w, h, groundY, pd = 1) {
   renderer.setClearColor(0x000000, 0);
 
   let scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x141626, 3200, 9000);  // 아주 먼 건물만 살짝 흐려짐
+  scene.fog = new THREE.Fog(0x6a4a6e, 2600, 7500);  // 먼 곳은 노을빛 밤안개에 흐려짐
 
   let cam = new THREE.PerspectiveCamera(22, w / h, 10, 8000);
   cam.position.set(-200, 200, 1750);                 // 강 건너 북쪽, 살짝 높은 곳에서 비스듬히
   cam.lookAt(0, 140, -100);
 
-  scene.add(new THREE.HemisphereLight(0x5a6a9a, 0x2a1a10, 0.25));
+  scene.add(new THREE.HemisphereLight(0x8a6a9a, 0x2a1a10, 0.35));   // 노을 하늘빛
   let moon = new THREE.DirectionalLight(0xc8d4ff, 0.35);  // 오른쪽 위 달빛
   moon.position.set(800, 900, 600);
   scene.add(moon);
@@ -196,6 +196,18 @@ function renderCity3D(w, h, groundY, pd = 1) {
     let bh = apt ? 35 + Math.random() * 45 : 50 + Math.random() * 110;
     let b = boxBuilding(scene, x, z, bw, bd, bh, apt ? "apt" : "office", { rotY: (Math.random() - 0.5) * 0.3 });
     if (!apt && Math.random() < 0.3) antenna(scene, x, z, bh, 8 + Math.random() * 15);
+  }
+
+  // 멀리 펼쳐진 아파트 불빛 바다 (텍스처를 재사용해 가볍게)
+  let farTex = [0, 1, 2, 3, 4, 5].map(() => makeWinTex(60, 50, "apt"));
+  for (let i = 0; i < 700; i++) {
+    let x = -3200 + Math.random() * 6400, z = -1500 - Math.random() * 3500;
+    let tex = farTex[i % farTex.length];
+    let mat = new THREE.MeshStandardMaterial({ color: 0x8a8070, map: tex, emissive: 0xffffff, emissiveMap: tex, roughness: 0.9 });
+    let m = new THREE.Mesh(new THREE.BoxGeometry(40 + Math.random() * 40, 25 + Math.random() * 45, 15), mat);
+    m.position.set(x, m.geometry.parameters.height / 2, z);
+    m.rotation.y = (Math.random() - 0.5) * 0.6;
+    scene.add(m);
   }
 
   // 랜드마크

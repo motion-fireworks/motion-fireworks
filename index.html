@@ -116,6 +116,7 @@ function draw() {
   }
 
   drawWater();   // 호수: 도시와 불꽃이 물결에 흔들리며 비침
+  image(fg, 0, 0); // 앞쪽 한강 다리
 
   if (debugView) {
     blendMode(BLEND);
@@ -336,6 +337,60 @@ function makeLayers() {
   bloomAndGrain();
   skyBlur = sky.get(0, 0, width, GROUND);   // 물에 비친 모습은 흐릿하게
   skyBlur.filter(BLUR, 3);
+  drawBridge();
+}
+
+// 도시 뒤 산 능선 두 겹 (먼 산은 노을빛 안개에 흐리게)
+function mountains() {
+  sky.colorMode(RGB);
+  sky.noStroke();
+  for (let [peak, base, col, sc, seed] of [
+    [0.42, 0.24, [92, 66, 96], 0.004, 11],
+    [0.34, 0.2, [52, 40, 66], 0.007, 23]]) {
+    sky.fill(col[0], col[1], col[2]);
+    sky.beginShape();
+    sky.vertex(0, GROUND);
+    for (let x = 0; x <= width; x += 4) {
+      let n = noise(seed + x * sc) * 0.7 + noise(seed * 3 + x * sc * 3) * 0.3;
+      sky.vertex(x, GROUND - GROUND * (base + (peak - base) * n));
+    }
+    sky.vertex(width, GROUND);
+    sky.endShape(CLOSE);
+  }
+  sky.colorMode(HSB);
+}
+
+// 앞쪽 한강 다리: 왼쪽 아래에서 여의도 쪽으로 뻗은 다리 + 가로등 + 물에 비친 불빛 기둥
+let fg;
+function drawBridge() {
+  if (fg) fg.remove();
+  fg = createGraphics(width, height);
+  fg.pixelDensity(PD);
+  fg.colorMode(HSB);
+  fg.noStroke();
+  let x0 = -width * 0.02, y0 = GROUND + (height - GROUND) * 0.62;   // 가까운 쪽 끝
+  let x1 = width * 0.36, y1 = GROUND + 4;                            // 먼 쪽 끝 (여의도)
+  let t0 = (height - GROUND) * 0.07, t1 = 2;                         // 상판 두께 (원근)
+  for (let k = 0; k <= 14; k++) {                                    // 교각
+    let f = pow(k / 14, 1.6);
+    let px = lerp(x0, x1, f), py = lerp(y0, y1, f), th = lerp(t0, t1, f);
+    fg.fill(230, 25, 8);
+    fg.rect(px - th * 0.4, py + th, th * 0.8, (height - py) * 0.5 * (1 - f));
+  }
+  fg.fill(230, 25, 6);                                                // 상판
+  fg.quad(x0, y0, x1, y1, x1, y1 + t1, x0, y0 + t0);
+  fg.fill(30, 60, 55);
+  fg.quad(x0, y0 - 1, x1, y1 - 0.5, x1, y1, x0, y0);
+  for (let k = 0; k <= 40; k++) {                                     // 가로등 + 물에 비친 빛기둥
+    let f = pow(k / 40, 1.5);
+    let px = lerp(x0, x1, f), py = lerp(y0, y1, f), sz = lerp(5, 1.2, f);
+    fg.fill(38, 70, 100, 0.25);
+    fg.circle(px, py - sz, sz * 4);
+    fg.fill(42, 50, 100);
+    fg.circle(px, py - sz, sz);
+    fg.fill(38, 70, 90, 0.18 * (1 - f * 0.5));
+    fg.rect(px - sz * 0.4, py + lerp(t0, t1, f), sz * 0.8, (height - py) * 0.6 * (1 - f * 0.7));
+  }
 }
 
 // 빛 번짐(블룸): 밝은 창과 조명 주변으로 빛이 은은하게 퍼지게 → 카메라로 찍은 야경 느낌
@@ -373,11 +428,11 @@ function drawSky() {
   colorMode(RGB);              // color()는 메인 캔버스 색 모드를 따르므로 잠시 RGB로
   sky.noStroke();
   let stops = [
-    [0.0,  color(1, 3, 12)],
-    [0.45, color(6, 12, 32)],
-    [0.75, color(22, 30, 58)],
-    [0.92, color(70, 55, 62)],
-    [1.0,  color(120, 78, 52)]
+    [0.0,  color(8, 12, 38)],      // 해 진 직후의 개와 늑대의 시간: 위는 짙은 남보라
+    [0.35, color(34, 32, 70)],
+    [0.6,  color(80, 58, 96)],     // 가운데는 보랏빛
+    [0.82, color(140, 88, 112)],   // 아래로 갈수록 분홍빛 노을
+    [1.0,  color(190, 118, 110)]
   ];
   for (let y = 0; y < GROUND; y++) {
     let t = y / GROUND, c = stops[0][1];
@@ -396,7 +451,7 @@ function drawSky() {
   for (let i = 0; i < 160; i++) {
     let y = pow(random(), 1.6) * GROUND * 0.6;
     let fade = 1 - y / (GROUND * 0.6);
-    let b = random() < 0.08 ? random(160, 230) : random(25, 110);
+    let b = random() < 0.08 ? random(120, 200) : random(15, 70);   // 초저녁이라 별은 희미하게
     let warm = random([[255, 255, 255], [255, 240, 220], [220, 230, 255]]);
     sky.fill(warm[0], warm[1], warm[2], b * fade);
     sky.circle(random(width), y, b > 150 ? 1.8 : random(0.6, 1.2));
@@ -405,6 +460,7 @@ function drawSky() {
   colorMode(HSB);
   drawMoon(width * 0.85, GROUND * 0.17, max(18, height * 0.05));
   drawClouds();
+  mountains();
 }
 
 // 달: NASA 루나 리커니선스 오비터(LRO)가 찍은 실제 달 표면 지도로 만든 보름달 이미지
@@ -431,15 +487,15 @@ function drawClouds() {
   for (let y = 0; y < chh; y++) {
     let t = y / chh;
     let band = sin(t * PI) * 0.9 + 0.1;           // 하늘 중간 높이에 구름이 많음
-    let cr = lerp(28, 120, t * t), cg = lerp(32, 86, t * t), cb = lerp(52, 76, t * t);
+    let cr = lerp(40, 200, t * t), cg = lerp(38, 120, t * t), cb = lerp(70, 135, t * t);   // 아래 구름일수록 노을빛
     for (let x = 0; x < cw; x++) {
-      let n = noise(seed + x * 0.006, y * 0.022);
+      let n = noise(seed + x * 0.0035, y * 0.05);           // 가로로 길게 늘어진 얇은 구름
       let dens = constrain((n - 0.5) / 0.22, 0, 1) * band;
       let idx = 4 * (y * cw + x);
       img.pixels[idx] = cr;
       img.pixels[idx + 1] = cg;
       img.pixels[idx + 2] = cb;
-      img.pixels[idx + 3] = dens * 150;
+      img.pixels[idx + 3] = dens * 170;
     }
   }
   img.updatePixels();
