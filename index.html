@@ -31,15 +31,19 @@ let s = 1, offX = 0, offY = 0;
 const Y_UP = 180;
 let debugView = false;
 
-// ===== 배경 야경 =====
-const SKY_ALPHA = 0.85;   // 야경 진하기 (0 = 안 보임, 1 = 선명하게)
-let sky;                  // 야경 레이어
-let fx;                   // 불꽃 레이어
+// ===== 배경 =====
+const SKY_ALPHA = 1.0;    // 야경 진하기 (0 = 안 보임, 1 = 선명하게)
+let sky;                  // 야경 레이어 (처음 한 번만 그림)
+let skyBlur;              // 물에 비칠 흐린 야경
+let fx;                   // 불꽃 레이어 (매 프레임 그림)
+let GROUND;               // 호수 수면 높이
+let flash = 0, flashHue = 0;  // 불꽃이 터질 때 하늘이 밝아지는 효과
 
 // ===== 불꽃 설정 =====
-const BURST_COUNT = 30;
-const EMBER_EVERY = 2;
-const MAX_PARTICLES = 800;
+const BURST_COUNT = 90;     // 한 번 터질 때 불꽃 알갱이 수
+const SPARKLER_COUNT = 2;   // 손목 스파클러: 프레임마다 나오는 불티 수
+const MAX_PARTICLES = 1800; // 버벅이지 않게 최대 개수 제한
+const FIRE_COLORS = [355, 130, 210, 285, 45];  // 사람별 기본색: 빨강, 초록, 파랑, 보라, 금색
 
 // ===== 소리 설정 =====
 let audioCtx = null;
@@ -56,6 +60,7 @@ function preload() {
 }
 
 function setup() {
+  pixelDensity(1);
   createCanvas(windowWidth, windowHeight);
   video = createCapture({ video: { width: 640, height: 480 }, audio: false });
   video.hide();
@@ -71,18 +76,57 @@ function setup() {
 function draw() {
   updateCamSize();
 
-  // ---- 1) 불꽃 레이어: 잔상 효과는 여기서만 ----
+  // ---- 1) 불꽃 레이어 ----
   fx.blendMode(BLEND);
-  fx.background(0, 0, 0, 0.12);
+  fx.background(0, 0, 0, 0.18);   // 잔상(꼬리)
   fx.blendMode(ADD);
 
   for (let i = 0; i < poses.length; i++) {
     let pose = poses[i];
-    let baseHue = (i * 120) % 360;
-    handle(pose.left_wrist,  i + "L", baseHue);
-    handle(pose.right_wrist, i + "R", baseHue);
+    let hue = FIRE_COLORS[i % FIRE_COLORS.length];
+    handle(pose.left_wrist,  i + "L", hue);
+    handle(pose.right_wrist, i + "R", hue);
+  }
+  updateParticles();
+
+  // ---- 2) 화면에 합치기 ----
+  blendMode(BLEND);
+  background(0);
+  tint(0, 0, 100, SKY_ALPHA);
+  image(sky, 0, 0);
+  noTint();
+
+  // 불꽃이 터지면 하늘과 건물이 그 색으로 잠깐 밝아짐
+  if (flash > 0.01) {
+    blendMode(ADD);
+    noStroke();
+    fill(flashHue, 50, 30, flash * 0.18);
+    rect(0, 0, width, GROUND);
+    flash *= 0.86;
   }
 
+  drawWater();   // 호수: 도시와 불꽃이 물결에 흔들리며 비침
+
+  if (debugView) {
+    blendMode(BLEND);
+    push();
+    translate(offX + camW * s, offY - Y_UP);
+    scale(-s, s);
+    tint(0, 0, 100, 0.25);
+    image(video, 0, 0, camW, camH);
+    pop();
+    noTint();
+  }
+
+  blendMode(ADD);
+  image(fx, 0, 0);
+  blendMode(BLEND);
+}
+
+// =====================================================
+//  불꽃
+// =====================================================
+function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     let p = particles[i];
     p.px = p.x;
@@ -95,298 +139,470 @@ function draw() {
     p.life -= p.decay;
 
     if (p.life <= 0) {
+      if (p.crackle) crackle(p.x, p.y);   // 다 타고 나서 '타닥' 터지는 잔불꽃
       particles.splice(i, 1);
       continue;
     }
 
     if (p.kind === "flash") {
       fx.noStroke();
-      fx.fill(p.hue, 20, 100, p.life);
-      fx.circle(p.x, p.y, 60 * s * p.life);
+      fx.fill(p.hue, 30, 100, p.life * 0.35);
+      fx.circle(p.x, p.y, 50 * s * p.life);
+      fx.fill(0, 0, 100, p.life * 0.8);
+      fx.circle(p.x, p.y, 10 * s * p.life);
       continue;
     }
 
-    if (p.life < 0.4 && random() < 0.35) continue;
+    if (p.kind === "spark") {             // 손목의 스파클러 불티
+      fx.stroke(45, 25, 100, p.life);
+      fx.strokeWeight(1.2 * s);
+      fx.line(p.px, p.py, p.x, p.y);
+      continue;
+    }
 
-    let sat = map(p.life, 1, 0.5, 5, 85, true);
+    if (p.kind === "ash") {               // 버들 불꽃이 남기는 금빛 꼬리
+      fx.noStroke();
+      fx.fill(38, 75, 85, p.life * 0.8);
+      fx.circle(p.x, p.y, 1.6 * s);
+      continue;
+    }
+
+    if (p.kind === "crack") {             // 타닥 잔불꽃
+      fx.noStroke();
+      fx.fill(50, 10, 100, p.life);
+      fx.circle(p.x, p.y, random(1, 3.5) * s);
+      continue;
+    }
+
+    // star: 터진 불꽃 알갱이
+    if (p.life < 0.3 && random() < 0.4) continue;     // 꺼지기 직전 깜빡임
+    let sat = map(p.life, 1, 0.75, 0, p.sat, true);    // 처음엔 하얗게 뜨겁다가 색이 드러남
     fx.stroke(p.hue, sat, 100, p.life);
-    fx.strokeWeight((p.kind === "spark" ? 2.5 : 2) * s);
+    fx.strokeWeight(p.size * s);
     fx.line(p.px, p.py, p.x, p.y);
+    fx.noStroke();
+    fx.fill(p.hue, sat, 100, 0.12 * p.life);           // 은은한 빛 번짐
+    fx.circle(p.x, p.y, p.size * 5 * s);
+
+    if (p.willow && frameCount % 2 === 0 && particles.length < MAX_PARTICLES) {
+      particles.push({
+        kind: "ash", x: p.x, y: p.y, px: p.x, py: p.y,
+        vx: 0, vy: 0.2, drag: 0.98, grav: 0.01,
+        life: 1, decay: 0.03
+      });
+    }
   }
+}
 
-  // ---- 2) 화면에 합치기: 야경 → (확인모드 영상) → 불꽃 ----
-  blendMode(BLEND);
-  background(0);
-  tint(0, 0, 100, SKY_ALPHA);
-  image(sky, 0, 0);
-  noTint();
-
-  if (debugView) {
-    push();
-    translate(offX + camW * s, offY - Y_UP);
-    scale(-s, s);
-    tint(0, 0, 100, 0.25);
-    image(video, 0, 0, camW, camH);
-    pop();
-    noTint();
+function add(p) {
+  if (particles.length < MAX_PARTICLES) {
+    p.px = p.x;
+    p.py = p.y;
+    particles.push(p);
   }
+}
 
-  blendMode(ADD);
-  image(fx, 0, 0);
+// 손목에서 계속 튀는 스파클러(불꽃 막대) 불티
+function sparkler(x, y) {
+  for (let k = 0; k < SPARKLER_COUNT; k++) {
+    let a = random(TWO_PI), sp = random(1, 4);
+    add({
+      kind: "spark", x: x, y: y,
+      vx: cos(a) * sp, vy: sin(a) * sp,
+      drag: 0.9, grav: 0.1,
+      life: 1, decay: random(0.05, 0.09)
+    });
+  }
+}
+
+// 팡! 실제 불꽃놀이처럼 세 가지 모양 중 하나로 터짐
+function burst(x, y, hue) {
+  flash = 1;
+  flashHue = hue;
+  add({ kind: "flash", x: x, y: y, vx: 0, vy: 0, drag: 1, grav: 0, life: 1, decay: 0.15, hue: hue });
+
+  let r = random();
+  if (r < 0.55) {
+    // 국화형(피오니): 구 모양으로 퍼지는 가장 흔한 불꽃 + 가운데 금빛 심
+    let maxSp = random(4, 5.5);
+    for (let k = 0; k < BURST_COUNT; k++) {
+      let a = random(TWO_PI);
+      let z = random(-1, 1);                      // 구를 정면에서 본 모양이 되도록
+      let sp = maxSp * sqrt(1 - z * z) * random(0.92, 1);
+      add({
+        kind: "star", x: x, y: y,
+        vx: cos(a) * sp, vy: sin(a) * sp,
+        drag: 0.955, grav: 0.045,
+        life: 1, decay: random(0.010, 0.016),
+        hue: (hue + random(-8, 8) + 360) % 360, sat: 85, size: 2
+      });
+    }
+    for (let k = 0; k < 20; k++) {
+      let a = random(TWO_PI), sp = random(0.5, 2);
+      add({
+        kind: "star", x: x, y: y,
+        vx: cos(a) * sp, vy: sin(a) * sp,
+        drag: 0.95, grav: 0.03,
+        life: 1, decay: random(0.02, 0.03),
+        hue: 45, sat: 40, size: 1.8
+      });
+    }
+  } else if (r < 0.8) {
+    // 버들형(윌로우): 금빛 꼬리를 길게 늘어뜨리며 천천히 떨어짐
+    let maxSp = random(3, 3.8);
+    for (let k = 0; k < BURST_COUNT * 0.8; k++) {
+      let a = random(TWO_PI);
+      let z = random(-1, 1);
+      let sp = maxSp * sqrt(1 - z * z);
+      add({
+        kind: "star", x: x, y: y,
+        vx: cos(a) * sp, vy: sin(a) * sp,
+        drag: 0.97, grav: 0.025,
+        life: 1, decay: random(0.005, 0.008),
+        hue: 38, sat: 75, size: 1.5, willow: true
+      });
+    }
+  } else {
+    // 고리형 + 타닥: 둥근 고리로 퍼지고 끝에서 잔불꽃이 터짐
+    let n = floor(BURST_COUNT * 0.6);
+    let sp = random(4, 5);
+    for (let k = 0; k < n; k++) {
+      let a = TWO_PI * k / n;
+      add({
+        kind: "star", x: x, y: y,
+        vx: cos(a) * sp, vy: sin(a) * sp,
+        drag: 0.955, grav: 0.035,
+        life: 1, decay: random(0.014, 0.018),
+        hue: hue, sat: 60, size: 2, crackle: true
+      });
+    }
+  }
+}
+
+function crackle(x, y) {
+  for (let k = 0; k < 3; k++) {
+    add({
+      kind: "crack",
+      x: x + random(-6, 6) * s, y: y + random(-6, 6) * s,
+      vx: 0, vy: 0, drag: 1, grav: 0.02,
+      life: 1, decay: random(0.12, 0.2)
+    });
+  }
 }
 
 // =====================================================
-//  배경: 상상의 도시 야경 (호숫가 도시 + 물 위 반사)
+//  배경: 상상의 호숫가 도시 야경 (사실적인 표현)
 // =====================================================
-let GROUND;   // 땅(수면) 높이
-
 function makeLayers() {
   if (fx) fx.remove();
   if (sky) sky.remove();
 
   fx = createGraphics(width, height);
+  fx.pixelDensity(1);
   fx.colorMode(HSB);
   fx.strokeCap(ROUND);
 
   sky = createGraphics(width, height);
-  sky.colorMode(HSB);
+  sky.pixelDensity(1);
 
-  GROUND = height * 0.86;
-
-  // 하늘: 위는 짙은 남색, 지평선 쪽은 도시 불빛에 물든 보랏빛
-  sky.noStroke();
-  for (let y = 0; y < height; y += 2) {
-    let t = y / GROUND;
-    sky.fill(lerp(232, 285, t), lerp(75, 55, t), lerp(5, 32, t));
-    sky.rect(0, y, width, 2);
-  }
-
+  GROUND = height * 0.84;
   let W = width, H = GROUND;
 
-  // 뒷줄: 멀리 있는 낮은 빌딩들
-  backRow(H * 0.36);
+  drawSky();
+  sky.colorMode(HSB);
 
-  // 중간줄: 랜드마크 사이를 채우는 빌딩들
-  for (let p of [0.04, 0.22, 0.39, 0.56, 0.72, 0.87, 0.97]) {
-    let w = W * random(0.05, 0.08);
-    rectBuilding(W * p - w / 2, w, H * random(0.25, 0.42), 0.8, 0.3);
-  }
+  // 먼 빌딩숲 → 안개로 흐리게
+  row(H * 0.22, H * 0.42, 0.35, W * 0.025, W * 0.05);
+  haze(0.55);
 
-  // 상상의 랜드마크 (왼쪽 → 오른쪽)
-  stackedBlocks(W * 0.13, W * 0.08, H * 0.52);   // 엇갈려 쌓인 상자 빌딩
-  twinTowers(W * 0.30, W * 0.045, H * 0.6, H * 0.5); // 하늘다리로 이어진 쌍둥이
-  spiralTower(W * 0.47, W * 0.09, H * 0.82);      // 층마다 비틀린 나선 타워
-  crescent(W * 0.63, W * 0.08, H * 0.66);         // 초승달 곡면 타워
-  haloNeedle(W * 0.79, W * 0.035, H * 0.72);      // 빛의 고리를 두른 바늘 탑
-  dome(W * 0.92, W * 0.10, H * 0.2);              // 반구 전망대
+  // 중간 빌딩숲
+  row(H * 0.25, H * 0.5, 0.6, W * 0.035, W * 0.065);
+  haze(0.25);
 
-  // 수면 반사
-  reflection();
+  // 상상의 랜드마크
+  steppedTower(W * 0.12, W * 0.075, H * 0.6);
+  twinTowers(W * 0.27, W * 0.045, H * 0.64, H * 0.55);
+  spiralTower(W * 0.47, W * 0.085, H * 0.84);
+  crescentTower(W * 0.62, W * 0.075, H * 0.7);
+  needleTower(W * 0.79, W * 0.022, H * 0.76);
+
+  // 앞쪽 낮은 건물들 (호숫가)
+  row(H * 0.1, H * 0.24, 1, W * 0.04, W * 0.08);
+
+  groundGlow();
+  drawWaterBase();
+
+  skyBlur = sky.get(0, 0, width, GROUND);   // 물에 비친 모습은 흐릿하게
+  skyBlur.filter(BLUR, 3);
 }
 
-// 건물 몸체 색 (dim이 클수록 가까워서 살짝 밝음)
-function bodyColor(dim) {
-  sky.fill(230, 35, 8 + 8 * dim);
-  sky.stroke(230, 25, 22 + 10 * dim);   // 윤곽선을 살짝 밝게 → 하늘과 구분
-  sky.strokeWeight(1);
-}
-
-// 창문 불빛: 대부분 따뜻한 노란빛, 일부는 차가운 흰빛
-function windowLight(dim) {
+// 하늘: 짙은 남색 → 지평선 쪽은 도시 불빛에 물든 따뜻한 빛, 별과 달
+function drawSky() {
+  sky.colorMode(RGB);
   sky.noStroke();
-  if (random() < 0.3) sky.fill(200, 15, 40 + 55 * dim);
-  else sky.fill(random(32, 50), random(40, 70), 30 + 65 * dim);
+  let c1 = color(3, 5, 16), c2 = color(22, 20, 44), c3 = color(72, 46, 52);
+  for (let y = 0; y < GROUND; y += 2) {
+    let t = y / GROUND;
+    let c = t < 0.6 ? lerpColor(c1, c2, t / 0.6) : lerpColor(c2, c3, (t - 0.6) / 0.4);
+    sky.fill(c);
+    sky.rect(0, y, width, 2);
+  }
+  for (let i = 0; i < 140; i++) {          // 희미한 별
+    let y = random(GROUND * 0.55);
+    sky.fill(255, 255, 255, random(30, 120) * (1 - y / (GROUND * 0.55)));
+    sky.circle(random(width), y, random(0.8, 1.8));
+  }
+  let mx = width * 0.88, my = GROUND * 0.14, mr = max(12, height * 0.022);
+  for (let g = 6; g > 0; g--) {            // 달무리
+    sky.fill(200, 210, 230, 6);
+    sky.circle(mx, my, mr * 2 * (1 + g * 0.6));
+  }
+  sky.fill(235, 232, 215);
+  sky.circle(mx, my, mr * 2);
+  sky.fill(210, 205, 190, 120);
+  sky.circle(mx - mr * 0.3, my + mr * 0.2, mr * 0.5);
+  sky.circle(mx + mr * 0.35, my - mr * 0.25, mr * 0.3);
 }
 
-// 직사각형 빌딩 + 창문
-function rectBuilding(x, w, h, dim, prob) {
+// 먼 건물일수록 지평선 쪽 공기색으로 덮어서 흐리게 (대기원근법)
+function haze(a) {
+  sky.noStroke();
+  let span = GROUND * 0.6;
+  for (let y = GROUND - span; y < GROUND; y += 3) {
+    let t = (y - (GROUND - span)) / span;
+    sky.fill(300, 30, 26, a * t);
+    sky.rect(0, y, width, 3);
+  }
+}
+
+// 지면 근처 가로등·거리 불빛이 은은하게 번지는 효과
+function groundGlow() {
+  sky.noStroke();
+  let span = GROUND * 0.12;
+  for (let y = GROUND - span; y < GROUND; y += 2) {
+    let t = (y - (GROUND - span)) / span;
+    sky.fill(30, 70, 60, 0.12 * t);
+    sky.rect(0, y, width, 2);
+  }
+  for (let x = random(5, 20); x < width; x += random(8, 22)) {   // 호숫가 가로등
+    sky.fill(38, 60, 100);
+    sky.circle(x, GROUND - 2, 2);
+    sky.fill(38, 60, 100, 0.15);
+    sky.circle(x, GROUND - 2, 8);
+  }
+}
+
+// 호수 바탕 (반사는 drawWater에서 매 프레임 그림)
+function drawWaterBase() {
+  sky.noStroke();
+  for (let y = GROUND; y < height; y += 2) {
+    let t = (y - GROUND) / (height - GROUND);
+    sky.fill(230, 50, lerp(9, 2, t));
+    sky.rect(0, y, width, 2);
+  }
+  sky.stroke(0, 0, 0);
+  sky.strokeWeight(2);
+  sky.line(0, GROUND, width, GROUND);
+}
+
+// 한 줄로 늘어선 빌딩들
+function row(minH, maxH, dim, minW, maxW) {
+  let x = -random(minW);
+  while (x < width) {
+    let w = random(minW, maxW);
+    tower(x, w, random(minH, maxH), dim);
+    x += w + random(-w * 0.2, w * 0.15);
+  }
+}
+
+// 사실적인 빌딩: 한쪽이 밝은 외벽 + 층별로 켜진 창문 + 옥상 설비
+function tower(x, w, h, dim) {
   let top = GROUND - h;
-  bodyColor(dim);
-  sky.rect(x, top, w, h);
-  litWindows(x, top, w, h, dim, prob);
-  return top;
+  facade(x, top, w, h, dim);
+  windowsGrid(x, top, w, h, dim, () => w);
+  roof(x, top, w, dim);
 }
 
-function litWindows(x, top, w, h, dim, prob) {
-  let win = max(4, width / 160);
-  let gap = win * 0.7;
-  for (let wy = top + gap * 1.5; wy < top + h - win; wy += win + gap) {
-    for (let wx = x + gap; wx < x + w - win * 0.7; wx += win * 0.7 + gap) {
-      if (random() < prob) {
-        windowLight(dim);
-        sky.rect(wx, wy, win * 0.7, win);
+function facade(x, top, w, h, dim) {
+  sky.noStroke();
+  let base = 5 + 6 * dim;
+  for (let i = 0; i < w; i += 2) {
+    sky.fill(225, 30, base * (0.7 + 0.6 * (i / w)));
+    sky.rect(x + i, top, min(2, w - i), h);
+  }
+}
+
+// 창문 불빛 색: 백열등, 형광등, LED, 호박색
+const LIGHT_TONES = [[38, 55, 90], [55, 12, 92], [200, 12, 95], [30, 70, 80]];
+
+// 창문 격자. widthAt(y)는 그 높이에서 건물 폭 (곡면 건물용)
+function windowsGrid(x, top, w, h, dim, widthAt) {
+  let win = max(2, width / 320);
+  let floorH = win * 1.75, colW = win * 1.3, m = win * 0.7;
+  let dark = 9 + 5 * dim;
+  sky.noStroke();
+  for (let y = top + floorH * 0.8; y < GROUND - floorH * 0.6; y += floorH) {
+    let r = random();
+    let floorP = r < 0.06 ? 0.9 : r < 0.5 ? 0.04 : random(0.1, 0.4);  // 층마다 켜진 정도가 다름
+    let tone = random(LIGHT_TONES);
+    let ww = widthAt(y);
+    for (let xx = x + m; xx < x + ww - m - win; xx += colW) {
+      if (random() < floorP) {
+        let b = tone[2] * (0.2 + 0.7 * dim) * random(0.6, 1);
+        sky.fill(tone[0], tone[1], b);
+      } else {
+        sky.fill(220, 35, dark);   // 꺼진 창: 어두운 유리
       }
+      sky.rect(xx, y, win, win * 1.1);
     }
   }
 }
 
-function backRow(maxH) {
-  let x = 0;
-  while (x < width) {
-    let w = random(width * 0.03, width * 0.07);
-    rectBuilding(x, w, random(maxH * 0.4, maxH), 0.45, 0.22);
-    x += w + random(0, width * 0.005);
+function roof(x, top, w, dim) {
+  let r = random();
+  sky.noStroke();
+  if (r < 0.3) {                         // 안테나 + 빨간 항공 경고등
+    let ah = random(10, 30) * (0.5 + dim * 0.5);
+    sky.stroke(220, 10, 25 + 20 * dim);
+    sky.strokeWeight(1.5);
+    sky.line(x + w * 0.5, top, x + w * 0.5, top - ah);
+    sky.noStroke();
+    sky.fill(0, 90, 60 + 40 * dim);
+    sky.circle(x + w * 0.5, top - ah, 3);
+  } else if (r < 0.55) {                 // 옥상 기계실
+    sky.fill(225, 30, 6 + 5 * dim);
+    sky.rect(x + w * 0.2, top - w * 0.12, w * 0.5, w * 0.12);
+  } else if (r < 0.65) {                 // 옥상 조명 띠
+    sky.fill(45, 20, 60 + 35 * dim);
+    sky.rect(x, top, w, 2);
   }
 }
 
-// ---- 엇갈려 쌓인 상자 빌딩: 블록을 지그재그로 쌓은 모양 ----
-function stackedBlocks(cx, w, h) {
-  let n = 5, bh = h / n;
-  for (let i = 0; i < n; i++) {
-    let bw = w * random(0.8, 1.25);
-    let bx = cx - bw / 2 + (i % 2 === 0 ? -1 : 1) * w * random(0.1, 0.25);
-    let by = GROUND - (i + 1) * bh;
-    bodyColor(1);
-    sky.rect(bx, by, bw, bh);
-    litWindows(bx, by, bw, bh, 1, 0.4);
-    sky.noStroke();
-    sky.fill(320, 40, 85);                         // 블록마다 분홍빛 띠
-    sky.rect(bx, by + bh - 2, bw, 2);
-  }
+// ---- 계단식 타워: 위로 갈수록 몇 단씩 좁아짐 + 꼭대기 조명 ----
+function steppedTower(cx, w, h) {
+  let steps = [[1.0, 0.7], [0.78, 0.86], [0.56, 0.96], [0.3, 1.0]];
+  for (let st of steps) tower(cx - w * st[0] / 2, w * st[0], h * st[1], 1);
+  let top = GROUND - h;
+  sky.noStroke();
+  sky.fill(45, 25, 100, 0.25);
+  sky.ellipse(cx, top, w * 0.6, w * 0.2);
+  sky.stroke(220, 10, 45);
+  sky.strokeWeight(2);
+  sky.line(cx, top, cx, top - h * 0.08);
 }
 
 // ---- 하늘다리로 이어진 쌍둥이 타워 ----
 function twinTowers(cx, w, h1, h2) {
   let x1 = cx - w * 1.5, x2 = cx + w * 0.5;
-  rectBuilding(x1, w, h1, 1, 0.35);
-  rectBuilding(x2, w, h2, 1, 0.35);
-  let by = GROUND - min(h1, h2) * 0.72;
-  bodyColor(1);
-  sky.rect(x1 + w, by, x2 - x1 - w, w * 0.4);
+  tower(x1, w, h1, 1);
+  tower(x2, w, h2, 1);
+  let by = GROUND - min(h1, h2) * 0.7;
+  facade(x1 + w, by, x2 - x1 - w, w * 0.35, 1);
   sky.noStroke();
-  sky.fill(190, 45, 95);                           // 다리의 푸른 조명
-  sky.rect(x1 + w, by + w * 0.15, x2 - x1 - w, w * 0.1);
+  for (let xx = x1 + w + 3; xx < x2 - 4; xx += 5) {
+    sky.fill(55, 12, random() < 0.7 ? 90 : 20);
+    sky.rect(xx, by + w * 0.12, 3, w * 0.12);
+  }
 }
 
-// ---- 나선 타워: 층마다 조금씩 옆으로 비틀리며 올라감 ----
+// ---- 나선 타워: 층이 조금씩 비틀려 올라가는 유리 타워 ----
 function spiralTower(cx, w, h) {
-  let n = 24, fh = h / n;
-  let top = GROUND - h;
+  let n = 46, fh = h / n;
+  let win = max(2, width / 320);
   for (let i = 0; i < n; i++) {
     let t = i / n;
-    let off = sin(t * TWO_PI * 1.5) * w * 0.18;
+    let off = sin(t * TWO_PI * 1.2) * w * 0.15;
     let fw = w * (1 - t * 0.35);
-    let fx0 = cx - fw / 2 + off;
+    let x0 = cx - fw / 2 + off;
     let fy = GROUND - (i + 1) * fh;
-    bodyColor(1);
-    sky.rect(fx0, fy, fw, fh * 0.9);
-    if (random() < 0.6) {                          // 층별 창문 띠
-      windowLight(1);
-      let len = fw * random(0.3, 0.8);
-      sky.rect(fx0 + random(0, fw - len), fy + fh * 0.3, len, fh * 0.3);
-    }
+    facade(x0, fy, fw, fh, 1);
     sky.noStroke();
-    sky.fill(175, 60, 100);                        // 층 끝 조명 → 나선이 빛으로 보임
-    sky.circle(fx0 + fw, fy + fh * 0.45, max(3, fh * 0.35));
-  }
-  sky.stroke(230, 10, 55);
-  sky.strokeWeight(2);
-  sky.line(cx, top, cx, top - h * 0.1);
-  sky.noStroke();
-  sky.fill(175, 60, 100);
-  sky.circle(cx, top - h * 0.1, max(5, w * 0.06));
-}
-
-// ---- 초승달 타워: 한쪽 면이 크게 휘어진 곡면 빌딩 ----
-function crescent(cx, w, h) {
-  let x0 = cx - w / 2, top = GROUND - h;
-  bodyColor(1);
-  sky.beginShape();
-  sky.vertex(x0, GROUND);
-  sky.vertex(x0, top);
-  sky.bezierVertex(x0 + w * 1.3, top + h * 0.15, x0 + w * 1.2, top + h * 0.7, x0 + w, GROUND);
-  sky.endShape(CLOSE);
-
-  // 창문: 곡면 안쪽에만
-  let win = max(4, width / 160), gap = win * 0.7;
-  for (let wy = top + win * 2; wy < GROUND - win; wy += win + gap) {
-    let f = (wy - top) / h;
-    let edge = x0 + w * min(0.95, 0.2 + f * 1.4);
-    for (let wx = x0 + gap; wx < edge - win; wx += win * 0.7 + gap) {
-      if (random() < 0.35) {
-        windowLight(1);
-        sky.rect(wx, wy, win * 0.7, win);
-      }
+    sky.fill(220, 10, 28);                        // 층 슬래브 가장자리
+    sky.rect(x0, fy + fh - 1, fw, 1);
+    let r = random();
+    let floorP = r < 0.08 ? 0.9 : r < 0.45 ? 0.04 : random(0.15, 0.45);
+    let tone = random(LIGHT_TONES);
+    for (let xx = x0 + win * 0.6; xx < x0 + fw - win * 1.2; xx += win * 1.3) {
+      if (random() < floorP) sky.fill(tone[0], tone[1], tone[2] * random(0.6, 0.9));
+      else sky.fill(220, 35, 14);
+      sky.rect(xx, fy + fh * 0.2, win, fh * 0.55);
     }
   }
-
-  // 곡면 가장자리를 따라 흐르는 빛
-  sky.noFill();
-  sky.stroke(280, 50, 100);
-  sky.strokeWeight(2);
-  sky.bezier(x0, top, x0 + w * 1.3, top + h * 0.15, x0 + w * 1.2, top + h * 0.7, x0 + w, GROUND);
-}
-
-// ---- 빛의 고리를 두른 바늘 탑 ----
-function haloNeedle(cx, w, h) {
   let top = GROUND - h;
-  bodyColor(1);
-  sky.quad(cx - w / 2, GROUND, cx + w / 2, GROUND, cx + w * 0.2, top, cx - w * 0.2, top);
-  litWindows(cx - w * 0.3, top + h * 0.2, w * 0.6, h * 0.8, 1, 0.3);
-
-  let ry = top + h * 0.15;
-  sky.noStroke();
-  sky.fill(160, 50, 100, 0.15);                    // 고리 주변 번짐
-  sky.ellipse(cx, ry, w * 5, w * 1.6);
-  sky.noFill();
-  sky.stroke(160, 50, 100);
-  sky.strokeWeight(3);
-  sky.ellipse(cx, ry, w * 4, w * 1.0);
-
-  sky.stroke(230, 10, 55);
+  let topOff = sin(TWO_PI * 1.2) * w * 0.15;
+  sky.stroke(220, 10, 45);
   sky.strokeWeight(2);
-  sky.line(cx, top, cx, top - h * 0.12);
+  sky.line(cx + topOff, top, cx + topOff, top - h * 0.1);
   sky.noStroke();
   sky.fill(0, 90, 100);
-  sky.circle(cx, top - h * 0.12, max(4, w * 0.15));
+  sky.circle(cx + topOff, top - h * 0.1, 4);
 }
 
-// ---- 반구 전망대: 격자 유리 돔 ----
-function dome(cx, w, h) {
-  let baseH = h * 0.4;
-  rectBuilding(cx - w * 0.45, w * 0.9, baseH, 1, 0.3);
-  let dy = GROUND - baseH;
-  bodyColor(1);
-  sky.arc(cx, dy, w, h * 1.2, PI, TWO_PI, CHORD);
-  sky.noStroke();
-  for (let a = PI + 0.15; a < TWO_PI - 0.1; a += 0.22) {   // 돔 격자 불빛
-    for (let r = 0.25; r <= 0.95; r += 0.23) {
-      if (random() < 0.6) {
-        windowLight(1);
-        sky.circle(cx + cos(a) * w / 2 * r, dy + sin(a) * h * 0.6 * r, max(2, w * 0.025));
-      }
-    }
+// ---- 곡면 타워: 한쪽 면이 부드럽게 휘어진 유리 빌딩 ----
+function crescentTower(cx, w, h) {
+  let x0 = cx - w / 2, top = GROUND - h;
+  let edgeW = (y) => w * min(1, 0.25 + ((y - top) / h) * 1.5);
+  for (let y = top; y < GROUND; y += 2) {
+    let ww = edgeW(y);
+    facade(x0, y, ww, 2, 1);
   }
+  windowsGrid(x0, top, w, h, 1, edgeW);
+  sky.noFill();
+  sky.stroke(215, 15, 40);                        // 곡면 유리에 비친 하이라이트
+  sky.strokeWeight(1.5);
+  sky.beginShape();
+  for (let y = top; y < GROUND; y += 4) sky.vertex(x0 + edgeW(y), y);
+  sky.endShape();
 }
 
-// ---- 수면 반사: 도시를 뒤집어 희미하게 비추고 물결로 흐트러뜨림 ----
-function reflection() {
+// ---- 전망대 타워: 가는 기둥 + 원반형 전망대 + 안테나 ----
+function needleTower(cx, w, h) {
+  let top = GROUND - h;
+  for (let i = 0; i < 10; i++) {
+    let t = i / 10;
+    facade(cx - w / 2 * (1 - t * 0.3), GROUND - h * (t + 0.1), w * (1 - t * 0.3), h * 0.1, 1);
+  }
+  let py = top + h * 0.12, pw = w * 4.5, ph = w * 1.4;
+  sky.noStroke();
+  sky.fill(225, 30, 10);
+  sky.ellipse(cx, py, pw, ph);
+  sky.fill(225, 30, 6);
+  sky.rect(cx - pw * 0.35, py, pw * 0.7, ph * 0.5, 0, 0, ph * 0.3, ph * 0.3);
+  for (let a = 0.15; a < PI - 0.1; a += 0.12) {   // 전망대 창 띠
+    sky.fill(40, 40, random() < 0.8 ? 95 : 30);
+    sky.rect(cx + cos(a) * pw * 0.45 - 1, py + ph * 0.05, 2.5, ph * 0.18);
+  }
+  sky.stroke(220, 10, 45);
+  sky.strokeWeight(1.5);
+  sky.line(cx, top, cx, top - h * 0.14);
+  sky.noStroke();
+  sky.fill(0, 90, 100);
+  sky.circle(cx, top - h * 0.14, 4);
+}
+
+// =====================================================
+//  호수: 띠 단위로 잘라 물결처럼 흔들며 뒤집어 비춤
+// =====================================================
+function drawWater() {
   let r = height - GROUND;
-  let img = sky.get(0, GROUND - r, width, r);
+  let t = frameCount * 0.05;
+  let sh = 3;
+  for (let k = 0; k < r; k += sh) {
+    let depth = k / r;
+    let off = sin(k * 0.35 + t) * (1 + depth * 6) + sin(k * 0.11 - t * 0.7) * depth * 4;
+    let srcY = GROUND - k * 0.6 - sh;      // 0.6: 반사가 세로로 길게 늘어나 보이게
+    if (srcY < 0) break;
 
-  sky.noStroke();
-  sky.fill(235, 60, 5);
-  sky.rect(0, GROUND, width, r);
+    blendMode(BLEND);                       // 도시 반사
+    tint(0, 0, 100, 0.6 * (1 - depth * 0.5));
+    image(skyBlur, off * 1.5, GROUND + k, width, sh, 0, srcY, width, sh);
 
-  sky.push();
-  sky.scale(1, -1);
-  sky.tint(0, 0, 100, 0.35);
-  sky.image(img, 0, -(GROUND + r), width, r);
-  sky.pop();
-  sky.noTint();
-
-  // 물결
-  for (let y = GROUND + 2; y < height; y += random(3, 7)) {
-    sky.stroke(235, 50, 6, 0.7);
-    sky.strokeWeight(random(1, 2));
-    let x = random(-width * 0.2, width);
-    sky.line(x, y, x + random(width * 0.1, width * 0.5), y);
+    blendMode(ADD);                         // 불꽃 반사
+    tint(0, 0, 100, 0.65 * (1 - depth * 0.4));
+    image(fx, off * 1.5, GROUND + k, width, sh, 0, srcY, width, sh);
   }
-
-  // 수평선
-  sky.stroke(270, 30, 45);
-  sky.strokeWeight(1);
-  sky.line(0, GROUND, width, GROUND);
+  noTint();
+  blendMode(BLEND);
 }
 
 // =====================================================
@@ -402,7 +618,7 @@ function updateCamSize() {
   }
 }
 
-function handle(point, key, baseHue) {
+function handle(point, key, hue) {
   if (!point || point.confidence < MIN_CONF) {
     delete prevPts[key];
     return;
@@ -411,7 +627,7 @@ function handle(point, key, baseHue) {
   let x = offX + (camW - point.x) * s;
   let y = offY + point.y * s - Y_UP;
 
-  if (frameCount % EMBER_EVERY === 0) ember(x, y, baseHue);
+  sparkler(x, y);
 
   let prev = prevPts[key];
   if (prev) {
@@ -419,7 +635,7 @@ function handle(point, key, baseHue) {
     let now = millis();
     if (speed > SPEED_MIN && now - (lastPop[key] || 0) > COOLDOWN) {
       lastPop[key] = now;
-      burst(x, y, baseHue);
+      burst(x, y, hue);
 
       let idx = floor(map(point.y, camH, 0, 0, SCALE.length));
       idx = constrain(idx, 0, SCALE.length - 1);
@@ -427,48 +643,6 @@ function handle(point, key, baseHue) {
     }
   }
   prevPts[key] = { x: point.x, y: point.y };
-}
-
-function ember(x, y, baseHue) {
-  if (particles.length > MAX_PARTICLES) return;
-  particles.push({
-    kind: "ember",
-    x: x, y: y, px: x, py: y,
-    vx: random(-0.5, 0.5),
-    vy: random(-1.5, -0.3),
-    drag: 0.99,
-    grav: -0.005,
-    life: 1,
-    decay: 0.015,
-    hue: (baseHue + random(-20, 20) + 360) % 360
-  });
-}
-
-function burst(x, y, baseHue) {
-  particles.push({
-    kind: "flash",
-    x: x, y: y, px: x, py: y,
-    vx: 0, vy: 0, drag: 1, grav: 0,
-    life: 1, decay: 0.12,
-    hue: baseHue
-  });
-
-  for (let k = 0; k < BURST_COUNT; k++) {
-    if (particles.length > MAX_PARTICLES) return;
-    let angle = TWO_PI * k / BURST_COUNT + random(-0.1, 0.1);
-    let speed = random(2.5, 4.5);
-    particles.push({
-      kind: "spark",
-      x: x, y: y, px: x, py: y,
-      vx: cos(angle) * speed,
-      vy: sin(angle) * speed,
-      drag: 0.95,
-      grav: 0.04,
-      life: 1,
-      decay: random(0.012, 0.02),
-      hue: (baseHue + random(-15, 15) + 360) % 360
-    });
-  }
 }
 
 function playChime(freq) {
