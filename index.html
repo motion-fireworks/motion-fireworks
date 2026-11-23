@@ -297,7 +297,7 @@ function crackle(x, y) {
 }
 
 // =====================================================
-//  배경: 상상의 호숫가 도시 야경 (사실적인 표현)
+//  배경: 한강 건너편에서 본 여의도 야경
 // =====================================================
 function makeLayers() {
   if (fx) fx.remove();
@@ -321,23 +321,26 @@ function makeLayers() {
   sky.colorMode(HSB);
 
   // 먼 빌딩숲 → 안개로 흐리게
-  row(H * 0.22, H * 0.42, 0.35, W * 0.025, W * 0.05);
+  row(H * 0.15, H * 0.32, 0.35, W * 0.025, W * 0.05);
   haze(0.55);
 
   // 중간 빌딩숲
-  row(H * 0.25, H * 0.5, 0.6, W * 0.035, W * 0.065);
+  row(H * 0.18, H * 0.38, 0.6, W * 0.035, W * 0.065);
   haze(0.25);
 
-  // 상상의 랜드마크
-  // (소실점에서 먼 것부터 그림)
-  steppedTower(W * 0.12, W * 0.075, H * 0.6);
-  needleTower(W * 0.82, W * 0.022, H * 0.76);
-  twinTowers(W * 0.27, W * 0.045, H * 0.64, H * 0.55);
-  crescentTower(W * 0.68, W * 0.075, H * 0.7);
-  spiralTower(W * 0.45, W * 0.085, H * 0.84);
+  // 여의도 랜드마크 (소실점에서 먼 것부터 그림)
+  building63(W * 0.12, W * 0.08, H * 0.6);
+  assembly(W * 0.9, W * 0.16, H * 0.17);
+  lgTwin(W * 0.27, W * 0.033, H * 0.34);
+  withFacade(210, 25, () => wedgeTower(W * 0.78, W * 0.05, GROUND - H * 0.62, GROUND - H * 0.56, 1, W * 0.04));   // FKI타워
+  withFacade(205, 30, () => wedgeTower(W * 0.35, W * 0.05, GROUND - H * 0.38, GROUND - H * 0.43, 1, W * 0.04));   // One IFC
+  parc1Tower(W * 0.665, W * 0.055, H * 0.65);                                                                      // 파크원 2동
+  withFacade(205, 30, () => wedgeTower(W * 0.42, W * 0.045, GROUND - H * 0.33, GROUND - H * 0.38, 1, W * 0.036)); // Two IFC
+  withFacade(205, 30, () => wedgeTower(W * 0.48, W * 0.045, GROUND - H * 0.66, GROUND - H * 0.71, 1, W * 0.036)); // Three IFC
+  parc1Tower(W * 0.575, W * 0.065, H * 0.8);                                                                       // 파크원 1동
 
-  // 앞쪽 낮은 건물들 (호숫가)
-  row(H * 0.1, H * 0.24, 1, W * 0.04, W * 0.08);
+  // 한강공원 나무숲
+  treeLine();
 
   groundGlow();
   drawWaterBase();
@@ -507,7 +510,7 @@ function prism(x, top, w, bottom, dim, D, floors) {
 function sideFace(xe, top, bottom, D, dim, floors) {
   let a = P(xe, top, D), b = P(xe, bottom, D);
   sky.noStroke();
-  sky.fill(225, 30, 3 + 4 * dim);        // 옆면은 앞면보다 어둡게
+  sky.fill(FACADE[0], FACADE[1], 3 + 4 * dim);        // 옆면은 앞면보다 어둡게
   sky.quad(xe, top, a[0], a[1], b[0], b[1], xe, bottom);
   sky.stroke(220, 15, 12 + 10 * dim);     // 모서리 선
   sky.strokeWeight(1);
@@ -539,7 +542,7 @@ function facade(x, top, w, h, dim) {
   sky.noStroke();
   let base = 5 + 6 * dim;
   for (let i = 0; i < w; i += 2) {
-    sky.fill(225, 30, base * (0.7 + 0.6 * (i / w)));
+    sky.fill(FACADE[0], FACADE[1], base * (0.7 + 0.6 * (i / w)));
     sky.rect(x + i, top, min(2, w - i), h);
   }
   sky.fill(220, 10, 15 + 12 * dim);
@@ -602,101 +605,155 @@ function roof(x, top, w, dim) {
   }
 }
 
-// ---- 계단식 타워: 위로 갈수록 몇 단씩 좁아짐 + 꼭대기 조명 ----
-function steppedTower(cx, w, h) {
-  let steps = [[1.0, 0.7], [0.78, 0.86], [0.56, 0.96], [0.3, 1.0]];
-  for (let st of steps) {
-    let sw = w * st[0];
-    prism(cx - sw / 2, GROUND - h * st[1], sw, GROUND, 1, sw * 0.9);
+// =====================================================
+//  여의도 랜드마크 (한강 북쪽에서 남쪽을 바라본 모습)
+// =====================================================
+let FACADE = [225, 30];     // 외벽 색 (색상, 채도) — 건물마다 바꿔 씀
+
+function withFacade(h, sat, fn) { let old = FACADE; FACADE = [h, sat]; fn(); FACADE = old; }
+
+// 위로 갈수록 폭이 달라지는 건물 (63빌딩처럼). hwAt(y) = 그 높이의 절반 폭
+function shapedTower(cx, top, hwAt, D, dim, tones) {
+  let bottom = GROUND;
+  let hwB = hwAt(bottom);
+  let edgeX = null;
+  if (cx + hwB < VPX) edgeX = (y) => cx + hwAt(y);
+  else if (cx - hwB > VPX) edgeX = (y) => cx - hwAt(y);
+
+  sky.noStroke();
+  if (edgeX) {                                   // 옆면
+    sky.fill(FACADE[0], FACADE[1], 3 + 4 * dim);
+    sky.beginShape();
+    for (let y = top; y <= bottom; y += 3) sky.vertex(edgeX(y), y);
+    for (let y = bottom; y >= top; y -= 3) { let q = P(edgeX(y), y, D); sky.vertex(q[0], q[1]); }
+    sky.endShape(CLOSE);
   }
+  for (let y = top; y < bottom; y += 2) {        // 앞면 (아래로 갈수록 살짝 밝게)
+    let hw = hwAt(y);
+    sky.fill(FACADE[0], FACADE[1], (5 + 6 * dim) * (0.8 + 0.4 * (y - top) / (bottom - top)));
+    sky.rect(cx - hw, y, hw * 2, 2);
+  }
+  let win = winSize(), colW = win * 1.3;
+  for (let fl of genFloors(top, bottom)) {       // 창문
+    let hw = hwAt(fl.y) - win * 0.7;
+    let tone = tones ? random(tones) : fl.tone;
+    let p = tones ? max(fl.p, 0.55) : fl.p;
+    for (let xx = cx - hw; xx < cx + hw - win; xx += colW) {
+      if (random() < p) sky.fill(tone[0], tone[1], tone[2] * (0.25 + 0.7 * dim) * random(0.7, 1));
+      else sky.fill(FACADE[0], FACADE[1], 9 + 5 * dim);
+      sky.rect(xx, fl.y, win, win * 1.1);
+    }
+  }
+}
+
+// 지붕이 비스듬히 잘린 건물 (IFC, FKI타워처럼). topL = 왼쪽 꼭대기, topR = 오른쪽 꼭대기
+function wedgeTower(x, w, topL, topR, dim, D) {
+  let floors = genFloors(min(topL, topR), GROUND);
+  if (x + w < VPX) sideFace(x + w, topR, GROUND, D, dim, floors.filter(f => f.y > topR + 3));
+  else if (x > VPX) sideFace(x, topL, GROUND, D, dim, floors.filter(f => f.y > topL + 3));
+  sky.noStroke();
+  sky.fill(FACADE[0], FACADE[1], 6 + 6 * dim);
+  sky.quad(x, topL, x + w, topR, x + w, GROUND, x, GROUND);
+  let win = winSize(), colW = win * 1.3, m = win * 0.7;
+  for (let fl of floors) {
+    for (let xx = x + m; xx < x + w - m - win; xx += colW) {
+      if (fl.y < lerp(topL, topR, (xx + win - x) / w) + win) continue;   // 비스듬한 지붕 위로는 창 없음
+      if (random() < fl.p) sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * (0.25 + 0.7 * dim) * random(0.6, 1));
+      else sky.fill(FACADE[0], FACADE[1], 9 + 5 * dim);
+      sky.rect(xx, fl.y, win, win * 1.1);
+    }
+  }
+  sky.stroke(200, 15, 55);                        // 비스듬한 지붕선의 조명
+  sky.strokeWeight(1.5);
+  sky.line(x, topL, x + w, topR);
+  sky.noStroke();
+}
+
+// ---- 63빌딩: 위로 갈수록 좁아지는 금빛 유리 타워 ----
+function building63(cx, w, h) {
   let top = GROUND - h;
-  sky.noStroke();
-  sky.fill(45, 25, 100, 0.25);
-  sky.ellipse(cx, top, w * 0.6, w * 0.2);
-  sky.stroke(220, 10, 45);
-  sky.strokeWeight(2);
-  sky.line(cx, top, cx, top - h * 0.08);
-}
-
-// ---- 하늘다리로 이어진 쌍둥이 타워 ----
-function twinTowers(cx, w, h1, h2) {
-  let x1 = cx - w * 1.5, x2 = cx + w * 0.5;
-  let by = GROUND - min(h1, h2) * 0.7, bh = w * 0.35;
-  prism(x1, GROUND - h1, w, GROUND, 1, w * 0.9);
-  prism(x1 + w, by, x2 - x1 - w, by + bh, 1, w * 0.6, []);
-  sky.noStroke();
-  for (let xx = x1 + w + 3; xx < x2 - 4; xx += 5) {
-    sky.fill(55, 12, random() < 0.7 ? 90 : 20);
-    sky.rect(xx, by + bh * 0.35, 3, bh * 0.35);
-  }
-  prism(x2, GROUND - h2, w, GROUND, 1, w * 0.9);
-}
-
-// ---- 나선 타워: 층마다 비틀려 올라가는 유리 타워 (층 하나하나가 입체) ----
-function spiralTower(cx, w, h) {
-  let n = 46, fh = h / n;
-  let off = 0, x0 = cx - w / 2;
-  for (let i = 0; i < n; i++) {
-    let t = i / n;
-    off = sin(t * TWO_PI * 1.2) * w * 0.15;
-    let fw = w * (1 - t * 0.35);
-    x0 = cx - fw / 2 + off;
-    let fy = GROUND - (i + 1) * fh;
-    let r = random();
-    let floor1 = [{ y: fy + fh * 0.25, p: r < 0.08 ? 0.9 : r < 0.45 ? 0.04 : random(0.15, 0.45), tone: random(LIGHT_TONES) }];
-    prism(x0, fy, fw, fy + fh, 1, fw * 0.9, floor1);
-    sky.noStroke();
-    sky.fill(220, 10, 28);                       // 층 슬래브 가장자리
-    sky.rect(x0, fy + fh - 1, fw, 1);
-  }
-  let top = GROUND - h, tx = cx + off;
-  sky.stroke(220, 10, 45);
-  sky.strokeWeight(2);
-  sky.line(tx, top, tx, top - h * 0.1);
-  sky.noStroke();
-  sky.fill(0, 90, 100);
-  sky.circle(tx, top - h * 0.1, 4);
-}
-
-// ---- 곡면 타워: 한쪽 면이 부드럽게 휘어진 유리 빌딩 ----
-function crescentTower(cx, w, h) {
-  let x0 = cx - w / 2, top = GROUND - h;
-  let edgeW = (y) => w * min(1, 0.25 + ((y - top) / h) * 1.5);
-  let floors = genFloors(top, GROUND);
-  if (x0 > VPX) sideFace(x0, top, GROUND, w * 0.9, 1, floors);   // 곧은 쪽 옆면
-  for (let y = top; y < GROUND; y += 2) facade(x0, y, edgeW(y), 2, 1);
-  windowsGrid(x0, w, 1, edgeW, floors);
+  withFacade(40, 55, () => {
+    prism(cx - w * 0.85, GROUND - h * 0.07, w * 1.7, GROUND, 1, w * 0.8);   // 아래쪽 저층부
+    shapedTower(cx, top, (y) => (w / 2) * (0.42 + 0.58 * pow((y - top) / h, 0.85)), w * 0.55, 1,
+                [[42, 65, 95], [38, 55, 90], [45, 40, 98]]);
+  });
+  sky.stroke(42, 60, 90);                         // 금빛 모서리 조명
+  sky.strokeWeight(1.5);
   sky.noFill();
-  sky.stroke(215, 15, 40);                        // 곡면 유리에 비친 하이라이트
-  sky.strokeWeight(1.5);
   sky.beginShape();
-  for (let y = top; y < GROUND; y += 4) sky.vertex(x0 + edgeW(y), y);
+  for (let y = top; y <= GROUND - h * 0.07; y += 4) sky.vertex(cx - (w / 2) * (0.42 + 0.58 * pow((y - top) / h, 0.85)), y);
   sky.endShape();
+  sky.beginShape();
+  for (let y = top; y <= GROUND - h * 0.07; y += 4) sky.vertex(cx + (w / 2) * (0.42 + 0.58 * pow((y - top) / h, 0.85)), y);
+  sky.endShape();
+  sky.line(cx - w * 0.21, top, cx + w * 0.21, top);
+  sky.noStroke();
+  sky.fill(42, 30, 70);                           // 꼭대기 기계층
+  sky.rect(cx - w * 0.14, top - h * 0.025, w * 0.28, h * 0.025);
+  sky.fill(0, 90, 100);
+  sky.circle(cx, top - h * 0.03, 3);
 }
 
-// ---- 전망대 타워: 가는 기둥 + 원반형 전망대 + 안테나 ----
-function needleTower(cx, w, h) {
-  let top = GROUND - h;
-  for (let i = 0; i < 10; i++) {
-    let t = i / 10;
-    facade(cx - w / 2 * (1 - t * 0.3), GROUND - h * (t + 0.1), w * (1 - t * 0.3), h * 0.1, 1);
-  }
-  let py = top + h * 0.12, pw = w * 4.5, ph = w * 1.4;
+// ---- 파크원: 모서리의 붉은 거대 기둥이 지붕 위로 솟은 타워 ----
+function parc1Tower(x, w, h) {
+  let top = GROUND - h, ext = h * 0.05, fw = max(3, w * 0.075);
+  withFacade(220, 25, () => prism(x, top, w, GROUND, 1, w * 0.8));
   sky.noStroke();
-  sky.fill(225, 30, 10);
-  sky.ellipse(cx, py, pw, ph);
-  sky.fill(225, 30, 6);
-  sky.rect(cx - pw * 0.35, py, pw * 0.7, ph * 0.5, 0, 0, ph * 0.3, ph * 0.3);
-  for (let a = 0.15; a < PI - 0.1; a += 0.12) {   // 전망대 창 띠
-    sky.fill(40, 40, random() < 0.8 ? 95 : 30);
-    sky.rect(cx + cos(a) * pw * 0.45 - 1, py + ph * 0.05, 2.5, ph * 0.18);
+  for (let bx of [x - fw * 0.3, x + w - fw * 0.7]) {
+    sky.fill(4, 75, 62);                          // 붉은 기둥 (밤엔 조명을 받아 선명)
+    sky.rect(bx, top - ext, fw, h + ext);
+    sky.fill(4, 70, 95, 0.5);
+    sky.rect(bx + fw * 0.3, top - ext, fw * 0.25, h + ext);
   }
-  sky.stroke(220, 10, 45);
-  sky.strokeWeight(1.5);
-  sky.line(cx, top, cx, top - h * 0.14);
+  for (let k = 1; k <= 3; k++) {                  // 기둥을 잇는 붉은 가로 보
+    let yy = top + h * k * 0.25;
+    sky.fill(4, 70, 45);
+    sky.rect(x, yy, w, max(2, h * 0.006));
+  }
+  sky.fill(4, 80, 75);
+  sky.rect(x - fw * 0.3, top - ext, w + fw * 0.6, max(2, fw * 0.4));
+}
+
+// ---- LG 트윈타워: 똑같은 두 동, 갈색빛 유리 ----
+function lgTwin(cx, w, h) {
+  withFacade(30, 45, () => {
+    prism(cx - w * 1.3, GROUND - h, w, GROUND, 1, w * 0.9);
+    prism(cx + w * 0.3, GROUND - h, w, GROUND, 1, w * 0.9);
+  });
+}
+
+// ---- 국회의사당: 기둥이 늘어선 하얀 건물 + 초록 돔 (밤엔 조명을 받아 밝음) ----
+function assembly(cx, w, h) {
+  let bh = h * 0.55, top = GROUND - bh;
+  withFacade(40, 10, () => prism(cx - w / 2, top, w, GROUND, 1, w * 0.5, []));
   sky.noStroke();
-  sky.fill(0, 90, 100);
-  sky.circle(cx, top - h * 0.14, 4);
+  sky.fill(40, 12, 70);                           // 조명 받은 정면
+  sky.rect(cx - w / 2, top, w, bh);
+  for (let i = 0; i < 24; i++) {                  // 열주
+    let xx = cx - w / 2 + w * (i + 0.5) / 24;
+    sky.fill(40, 15, 40);
+    sky.rect(xx - 1, top + bh * 0.2, 2, bh * 0.7);
+  }
+  sky.fill(40, 10, 85);
+  sky.rect(cx - w / 2, top, w, bh * 0.14);        // 처마
+  sky.fill(40, 12, 55);
+  sky.rect(cx - w * 0.3, top - bh * 0.15, w * 0.6, bh * 0.15);
+  let dw = w * 0.42, dh = h * 0.55;
+  sky.fill(150, 40, 35);                          // 초록 돔
+  sky.arc(cx, top - bh * 0.15, dw, dh * 2, PI, TWO_PI, CHORD);
+  sky.fill(150, 25, 60, 0.6);
+  sky.arc(cx - dw * 0.1, top - bh * 0.15, dw * 0.55, dh * 1.7, PI, PI * 1.5, PIE);
+}
+
+// 호숫가 한강공원 나무숲 (어두운 실루엣)
+function treeLine() {
+  sky.noStroke();
+  sky.fill(150, 30, 4);
+  sky.beginShape();
+  sky.vertex(0, GROUND);
+  for (let x = 0; x <= width; x += 4) sky.vertex(x, GROUND - GROUND * (0.02 + 0.025 * noise(x * 0.03, 99)));
+  sky.vertex(width, GROUND);
+  sky.endShape(CLOSE);
 }
 
 // =====================================================
