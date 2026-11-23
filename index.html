@@ -38,7 +38,7 @@ let skyBlur;              // 물에 비칠 흐린 야경
 let fx;                   // 불꽃 레이어 (매 프레임 그림)
 let GROUND;               // 호수 수면 높이
 let flash = 0, flashHue = 0;  // 불꽃이 터질 때 하늘이 밝아지는 효과
-let moonImg;
+let moonImg, moonSoft;
 let PD = 1;                // 화면 픽셀 밀도
 let bgImg;                // 여의도 실사 배경 사진
 let WATER = [], WATER_Y;  // 사진 속 한강 수면 영역과 수면선              // 달 사진 (moon.png)
@@ -469,13 +469,26 @@ function drawSky() {
 //  출처: NASA/Goddard Space Flight Center Scientific Visualization Studio, CGI Moon Kit (공공 저작물)
 function drawMoon(mx, my, mr) {
   let ctx = sky.drawingContext;
-  let g = ctx.createRadialGradient(mx, my, mr * 0.95, mx, my, mr * 8);   // 달빛 번짐
-  g.addColorStop(0, "rgba(210,220,240,0.30)");
-  g.addColorStop(0.2, "rgba(170,185,220,0.10)");
-  g.addColorStop(1, "rgba(120,140,190,0)");
+  let g = ctx.createRadialGradient(mx, my, mr * 0.95, mx, my, mr * 8);   // 따뜻한 달빛 번짐
+  g.addColorStop(0, "rgba(255,226,160,0.32)");
+  g.addColorStop(0.2, "rgba(240,200,140,0.12)");
+  g.addColorStop(1, "rgba(200,160,120,0)");
   ctx.fillStyle = g;
   ctx.fillRect(mx - mr * 8, my - mr * 8, mr * 16, mr * 16);
-  if (moonImg) sky.image(moonImg, mx - mr, my - mr, mr * 2, mr * 2);
+  if (!moonImg) return;
+  if (!moonSoft) {                                // 그림 같은 배경에 맞게 살짝 부드럽게
+    moonSoft = moonImg.get();
+    moonSoft.filter(BLUR, 1.5);
+  }
+  sky.push();
+  sky.colorMode(RGB);
+  sky.tint(255, 222, 150);                        // 노르스름한 달
+  sky.image(moonSoft, mx - mr, my - mr, mr * 2, mr * 2);
+  sky.noTint();
+  sky.noStroke();
+  sky.fill(255, 232, 175, 105);                   // 무늬 대비를 낮춰 은은하게
+  sky.circle(mx, my, mr * 2 - 1);
+  sky.pop();
 }
 
 // 구름: 노이즈로 만든 얇은 층운. 아래쪽은 도시 불빛을 받아 따뜻하게 물듦
