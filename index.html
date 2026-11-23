@@ -6,8 +6,6 @@
   <title>손끝 불꽃놀이</title>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="city3d.js"></script>
   <style>
     html, body {
       margin: 0;
@@ -41,7 +39,9 @@ let fx;                   // 불꽃 레이어 (매 프레임 그림)
 let GROUND;               // 호수 수면 높이
 let flash = 0, flashHue = 0;  // 불꽃이 터질 때 하늘이 밝아지는 효과
 let moonImg;
-let PD = 1;                // 화면 픽셀 밀도              // 달 사진 (moon.png)
+let PD = 1;                // 화면 픽셀 밀도
+let bgImg;                // 여의도 실사 배경 사진
+let WATER = [], WATER_Y;  // 사진 속 한강 수면 영역과 수면선              // 달 사진 (moon.png)
 
 // ===== 불꽃 설정 =====
 const BURST_COUNT = 90;     // 한 번 터질 때 불꽃 알갱이 수
@@ -61,6 +61,7 @@ let lastPop = {};
 
 function preload() {
   moonImg = loadImage("moon.png");
+  bgImg = loadImage("yeouido.jpg");   // 배경 사진: 공유마당 '63빌딩'(김동우), 자유이용 기증
   ml5.setBackend("webgl");
   bodyPose = ml5.bodyPose("MoveNet", {
     modelType: FAST_MODE ? "SINGLEPOSE_LIGHTNING" : "MULTIPOSE_LIGHTNING",
@@ -115,8 +116,7 @@ function draw() {
     flash *= 0.86;
   }
 
-  drawWater();   // 호수: 도시와 불꽃이 물결에 흔들리며 비침
-  image(fg, 0, 0); // 앞쪽 한강 다리
+  drawWater();   // 사진 속 한강 수면에 불꽃이 흔들리며 비침
 
   if (debugView) {
     blendMode(BLEND);
@@ -316,28 +316,30 @@ function makeLayers() {
   sky = createGraphics(width, height);
   sky.pixelDensity(PD);
 
-  GROUND = height * 0.84;
-  let W = width, H = GROUND;
-  VPX = W * 0.56;          // 소실점: 화면 가운데 살짝 오른쪽
-  VPY = GROUND - H * 0.12; // 눈높이: 수면보다 조금 위 → 낮은 건물은 지붕이 보임
-  FOCAL = W * 0.6;      // 작을수록 입체감(원근)이 강해짐
+  // 사진을 화면에 꽉 차게 (비율 유지, 넘치는 부분은 잘라냄)
+  let sc = max(width / bgImg.width, height / bgImg.height);
+  let iw = bgImg.width * sc, ih = bgImg.height * sc;
+  let ix = (width - iw) / 2, iy = (height - ih) / 2;
+  let PX = (fx0) => ix + fx0 * iw, PY = (fy0) => iy + fy0 * ih;   // 사진 비율 좌표 → 화면 좌표
+  sky.image(bgImg, ix, iy, iw, ih);
 
-  drawSky();
+  // 해 질 녘 사진을 밤 분위기로: 하늘 쪽을 더 어둡게 (불빛은 살아 있도록 위쪽 위주로)
+  let ctx = sky.drawingContext;
+  let g = ctx.createLinearGradient(0, 0, 0, height);
+  g.addColorStop(0, "rgba(4,8,28,0.62)");
+  g.addColorStop(0.55, "rgba(10,12,35,0.40)");
+  g.addColorStop(0.75, "rgba(10,12,30,0.20)");
+  g.addColorStop(1, "rgba(5,8,20,0.25)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, height);
+
+  GROUND = PY(0.70);                // 사진 속 지평선(건물 아래쪽)
+  WATER_Y = PY(0.79);               // 수면선
+  WATER = [[0, 0.785], [0.03, 0.79], [0.2, 0.845], [0.36, 0.885], [0.5, 0.93], [0.56, 1], [0, 1]]
+          .map(([a, b]) => [PX(a), PY(b)]);
+
   sky.colorMode(HSB);
-
-  // 여의도 3D 모델을 렌더링해서 배경에 그림 (city3d.js)
-  sky.drawingContext.drawImage(renderCity3D(width, height, GROUND, PD), 0, 0, width, height);
-
-  // 한강공원 나무숲
-  treeLine();
-
-  groundGlow();
-  drawWaterBase();
-
-  bloomAndGrain();
-  skyBlur = sky.get(0, 0, width, GROUND);   // 물에 비친 모습은 흐릿하게
-  skyBlur.filter(BLUR, 3);
-  drawBridge();
+  drawMoon(PX(0.84), max(PY(0.14), height * 0.12), max(14, height * 0.035));
 }
 
 // 도시 뒤 산 능선 두 겹 (먼 산은 노을빛 안개에 흐리게)
@@ -979,25 +981,27 @@ function treeLine() {
 //  호수: 띠 단위로 잘라 물결처럼 흔들며 뒤집어 비춤
 // =====================================================
 function drawWater() {
-  let r = height - GROUND;
-  let t = frameCount * 0.05;
-  let sh = 3;
-  for (let k = 0; k < r; k += sh) {
-    let depth = k / r;
+  if (WATER.length === 0) return;
+  let ctx = drawingContext;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(WATER[0][0], WATER[0][1]);
+  for (let p of WATER) ctx.lineTo(p[0], p[1]);
+  ctx.closePath();
+  ctx.clip();                                   // 사진 속 물 위에만 그림
+  let t = frameCount * 0.05, sh = 3;
+  blendMode(ADD);
+  for (let k = 0; k < height - WATER_Y; k += sh) {
+    let depth = k / (height - WATER_Y);
     let off = sin(k * 0.35 + t) * (1 + depth * 6) + sin(k * 0.11 - t * 0.7) * depth * 4;
-    let srcY = GROUND - k * 0.6 - sh;      // 0.6: 반사가 세로로 길게 늘어나 보이게
+    let srcY = WATER_Y - k * 1.6 - sh;          // 수면 위 불꽃을 뒤집어 비춤
     if (srcY < 0) break;
-
-    blendMode(BLEND);                       // 도시 반사
-    tint(0, 0, 100, 0.6 * (1 - depth * 0.5));
-    image(skyBlur, off * 1.5, GROUND + k, width, sh, 0, srcY, width, sh);
-
-    blendMode(ADD);                         // 불꽃 반사
-    tint(0, 0, 100, 0.65 * (1 - depth * 0.4));
-    image(fx, off * 1.5, GROUND + k, width, sh, 0, srcY, width, sh);
+    tint(0, 0, 100, 0.55 * (1 - depth * 0.5));
+    image(fx, off * 1.5, WATER_Y + k, width, sh, 0, srcY, width, sh);
   }
   noTint();
   blendMode(BLEND);
+  ctx.restore();
 }
 
 // =====================================================
