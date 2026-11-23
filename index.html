@@ -28,8 +28,13 @@ let camW = 640, camH = 480;
 let s = 1, offX = 0, offY = 0;
 
 // ===== 위치 보정 =====
-const Y_UP = 180;      // 불꽃을 위로 올리는 정도 (화면 픽셀). 더 올리려면 숫자를 키우기
-let debugView = false; // D 키로 켜고 끄는 확인 모드
+const Y_UP = 180;
+let debugView = false;
+
+// ===== 배경 야경 =====
+const SKY_ALPHA = 0.85;   // 야경 진하기 (0 = 안 보임, 1 = 선명하게)
+let sky;                  // 야경 레이어
+let fx;                   // 불꽃 레이어
 
 // ===== 불꽃 설정 =====
 const BURST_COUNT = 30;
@@ -55,8 +60,8 @@ function setup() {
   video = createCapture({ video: { width: 640, height: 480 }, audio: false });
   video.hide();
   colorMode(HSB);
-  strokeCap(ROUND);
   noCursor();
+  makeLayers();
   computeScale();
 
   console.log("모델 준비 완료!");
@@ -66,21 +71,10 @@ function setup() {
 function draw() {
   updateCamSize();
 
-  blendMode(BLEND);
-  background(0, 0, 0, 0.12);
-
-  // 확인 모드: 카메라 영상을 희미하게 겹쳐서 보여줌
-  if (debugView) {
-    push();
-    translate(offX + camW * s, offY - Y_UP);
-    scale(-s, s);                 // 좌우 반전
-    tint(0, 0, 100, 0.25);        // 희미하게
-    image(video, 0, 0, camW, camH);
-    pop();
-    noTint();
-  }
-
-  blendMode(ADD);
+  // ---- 1) 불꽃 레이어: 잔상 효과는 여기서만 ----
+  fx.blendMode(BLEND);
+  fx.background(0, 0, 0, 0.12);
+  fx.blendMode(ADD);
 
   for (let i = 0; i < poses.length; i++) {
     let pose = poses[i];
@@ -106,20 +100,235 @@ function draw() {
     }
 
     if (p.kind === "flash") {
-      noStroke();
-      fill(p.hue, 20, 100, p.life);
-      circle(p.x, p.y, 60 * s * p.life);
+      fx.noStroke();
+      fx.fill(p.hue, 20, 100, p.life);
+      fx.circle(p.x, p.y, 60 * s * p.life);
       continue;
     }
 
     if (p.life < 0.4 && random() < 0.35) continue;
 
     let sat = map(p.life, 1, 0.5, 5, 85, true);
-    stroke(p.hue, sat, 100, p.life);
-    strokeWeight((p.kind === "spark" ? 2.5 : 2) * s);
-    line(p.px, p.py, p.x, p.y);
+    fx.stroke(p.hue, sat, 100, p.life);
+    fx.strokeWeight((p.kind === "spark" ? 2.5 : 2) * s);
+    fx.line(p.px, p.py, p.x, p.y);
+  }
+
+  // ---- 2) 화면에 합치기: 야경 → (확인모드 영상) → 불꽃 ----
+  blendMode(BLEND);
+  background(0);
+  tint(0, 0, 100, SKY_ALPHA);
+  image(sky, 0, 0);
+  noTint();
+
+  if (debugView) {
+    push();
+    translate(offX + camW * s, offY - Y_UP);
+    scale(-s, s);
+    tint(0, 0, 100, 0.25);
+    image(video, 0, 0, camW, camH);
+    pop();
+    noTint();
+  }
+
+  blendMode(ADD);
+  image(fx, 0, 0);
+}
+
+// =====================================================
+//  배경: 시카고 존 핸콕 센터 주변(매그니피센트 마일) 야경
+// =====================================================
+function makeLayers() {
+  if (fx) fx.remove();
+  if (sky) sky.remove();
+
+  fx = createGraphics(width, height);
+  fx.colorMode(HSB);
+  fx.strokeCap(ROUND);
+
+  sky = createGraphics(width, height);
+  sky.colorMode(HSB);
+
+  // 하늘: 위는 짙은 남색, 지평선 쪽은 도시 불빛에 물든 보랏빛
+  sky.noStroke();
+  for (let y = 0; y < height; y += 2) {
+    let t = y / height;
+    sky.fill(lerp(232, 285, t), lerp(75, 55, t), lerp(5, 32, t));
+    sky.rect(0, y, width, 2);
+  }
+
+  let W = width, H = height;
+
+  // 뒷줄: 멀리 있는 낮은 빌딩들
+  backRow(H * 0.38);
+
+  // 중간줄: 랜드마크 사이를 채우는 빌딩들
+  let fillers = [0.03, 0.11, 0.27, 0.36, 0.55, 0.71, 0.86, 0.94];
+  for (let fxp of fillers) {
+    let w = W * random(0.05, 0.08);
+    rectBuilding(W * fxp - w / 2, w, H * random(0.28, 0.46), 0.8, 0.3);
+  }
+
+  // 랜드마크 (왼쪽 → 오른쪽)
+  palmolive(W * 0.17, W * 0.09, H * 0.44);        // 팔몰리브 빌딩: 계단식 + 꼭대기 등대
+  waterTowerPlace(W * 0.31, W * 0.12, H * 0.52);   // 워터타워 플레이스: 넓고 창이 적은 상자형
+  hancock(W * 0.46, W * 0.15, H * 0.80);           // 존 핸콕 센터: 사다리꼴 + X자 철골 + 쌍안테나
+  nineHundred(W * 0.63, W * 0.09, H * 0.62);       // 900 노스 미시간: 꼭대기 네 귀퉁이 랜턴
+  parkTower(W * 0.78, W * 0.07, H * 0.64);         // 파크 타워: 날씬한 몸체 + 둥근 지붕 + 첨탑
+}
+
+// 건물 몸체 색 (dim이 클수록 가까워서 살짝 밝음)
+function bodyColor(dim) {
+  sky.fill(230, 35, 8 + 8 * dim);
+  sky.stroke(230, 25, 22 + 10 * dim);   // 윤곽선을 살짝 밝게 → 하늘과 구분
+  sky.strokeWeight(1);
+}
+
+// 창문 불빛
+function windowLight(dim) {
+  sky.noStroke();
+  sky.fill(random(32, 50), random(40, 70), 30 + 65 * dim);
+}
+
+// 직사각형 빌딩 + 창문
+function rectBuilding(x, w, h, dim, prob) {
+  let top = height - h;
+  bodyColor(dim);
+  sky.rect(x, top, w, h);
+  litWindows(x, top, w, h, dim, prob);
+  return top;
+}
+
+function litWindows(x, top, w, h, dim, prob) {
+  let win = max(4, width / 160);
+  let gap = win * 0.7;
+  for (let wy = top + gap * 1.5; wy < height - win; wy += win + gap) {
+    for (let wx = x + gap; wx < x + w - win * 0.7; wx += win * 0.7 + gap) {
+      if (random() < prob) {
+        windowLight(dim);
+        sky.rect(wx, wy, win * 0.7, win);
+      }
+    }
   }
 }
+
+function backRow(maxH) {
+  let x = 0;
+  while (x < width) {
+    let w = random(width * 0.03, width * 0.07);
+    rectBuilding(x, w, random(maxH * 0.4, maxH), 0.45, 0.22);
+    x += w + random(0, width * 0.005);
+  }
+}
+
+// ---- 존 핸콕 센터: 위로 갈수록 좁아지는 검은 타워 ----
+function hancock(cx, baseW, h) {
+  let top = height - h;
+  let topW = baseW * 0.6;
+  let halfW = (y) => lerp(topW, baseW, (y - top) / h) / 2;
+
+  // 몸체
+  bodyColor(1);
+  sky.fill(230, 30, 7);
+  sky.quad(cx - baseW / 2, height, cx + baseW / 2, height,
+           cx + topW / 2, top, cx - topW / 2, top);
+
+  // 창문 (사다리꼴 안쪽에만)
+  let win = max(4, width / 170);
+  let gap = win * 0.7;
+  for (let wy = top + win * 3; wy < height - win; wy += win + gap) {
+    let hw = halfW(wy) - gap * 2;
+    for (let wx = cx - hw; wx < cx + hw - win * 0.7; wx += win * 0.7 + gap) {
+      if (random() < 0.33) {
+        windowLight(1);
+        sky.rect(wx, wy, win * 0.7, win);
+      }
+    }
+  }
+
+  // 트레이드마크인 X자 철골 (5단)
+  sky.stroke(230, 15, 40);
+  sky.strokeWeight(max(2, baseW * 0.025));
+  let seg = h / 5;
+  for (let i = 0; i < 5; i++) {
+    let y1 = top + i * seg;
+    let y2 = y1 + seg;
+    let a = halfW(y1), b = halfW(y2);
+    sky.line(cx - a, y1, cx + b, y2);
+    sky.line(cx + a, y1, cx - b, y2);
+    sky.line(cx - a, y1, cx + a, y1);
+  }
+
+  // 꼭대기의 밝은 조명 띠
+  sky.noStroke();
+  sky.fill(45, 15, 95);
+  sky.rect(cx - topW / 2, top, topW, h * 0.018);
+
+  // 쌍둥이 안테나 + 빨간 항공 경고등
+  sky.stroke(230, 10, 55);
+  sky.strokeWeight(max(1.5, baseW * 0.015));
+  let ant = h * 0.2;
+  sky.line(cx - topW * 0.22, top, cx - topW * 0.22, top - ant);
+  sky.line(cx + topW * 0.22, top, cx + topW * 0.22, top - ant * 0.92);
+  sky.noStroke();
+  sky.fill(0, 90, 100);
+  sky.circle(cx - topW * 0.22, top - ant, max(4, baseW * 0.04));
+  sky.circle(cx + topW * 0.22, top - ant * 0.92, max(4, baseW * 0.04));
+}
+
+// ---- 900 노스 미시간: 꼭대기 네 귀퉁이에 빛나는 랜턴 ----
+function nineHundred(cx, w, h) {
+  let x = cx - w / 2;
+  let top = rectBuilding(x, w, h, 1, 0.35);
+  let tw = w * 0.16, th = h * 0.09;
+  for (let tx of [x, x + w * 0.28, x + w - w * 0.28 - tw, x + w - tw]) {
+    bodyColor(1);
+    sky.rect(tx, top - th, tw, th);
+    sky.triangle(tx, top - th, tx + tw, top - th, tx + tw / 2, top - th * 1.7);
+    sky.noStroke();
+    sky.fill(48, 30, 100);                      // 랜턴 불빛
+    sky.rect(tx + tw * 0.2, top - th * 0.8, tw * 0.6, th * 0.6);
+  }
+}
+
+// ---- 파크 타워: 날씬한 몸체 + 둥근 지붕 + 첨탑 ----
+function parkTower(cx, w, h) {
+  let x = cx - w / 2;
+  let top = rectBuilding(x, w, h, 1, 0.35);
+  bodyColor(1);
+  sky.arc(cx, top, w, w * 0.9, PI, TWO_PI, CHORD);
+  sky.noStroke();
+  sky.fill(200, 20, 90);                        // 지붕 아래 조명
+  sky.rect(x + 1, top - 2, w - 2, 3);
+  sky.stroke(230, 10, 55);
+  sky.strokeWeight(2);
+  sky.line(cx, top - w * 0.45, cx, top - w * 0.45 - h * 0.1);
+}
+
+// ---- 워터타워 플레이스: 넓은 대리석 상자, 창이 적음 ----
+function waterTowerPlace(cx, w, h) {
+  rectBuilding(cx - w / 2, w, h, 1, 0.12);
+}
+
+// ---- 팔몰리브 빌딩: 아르데코 계단식 + 꼭대기 등대 불빛 ----
+function palmolive(cx, w, h) {
+  let steps = [[1.0, 0.72], [0.72, 0.86], [0.46, 0.96], [0.24, 1.0]];
+  let top = height - h;
+  for (let st of steps) {
+    let sw = w * st[0];
+    rectBuilding(cx - sw / 2, sw, h * st[1], 1, 0.3);
+  }
+  sky.stroke(230, 10, 55);
+  sky.strokeWeight(2);
+  sky.line(cx, top, cx, top - h * 0.12);
+  sky.noStroke();
+  sky.fill(50, 30, 100, 0.5);                   // 등대 불빛 번짐
+  sky.circle(cx, top - h * 0.12, w * 0.25);
+  sky.fill(50, 20, 100);
+  sky.circle(cx, top - h * 0.12, w * 0.08);
+}
+
+// =====================================================
 
 function updateCamSize() {
   let vw = video.elt.videoWidth;
@@ -139,7 +348,7 @@ function handle(point, key, baseHue) {
   }
 
   let x = offX + (camW - point.x) * s;
-  let y = offY + point.y * s - Y_UP;   // ← 여기서 위로 올림
+  let y = offY + point.y * s - Y_UP;
 
   if (frameCount % EMBER_EVERY === 0) ember(x, y, baseHue);
 
@@ -225,10 +434,10 @@ function computeScale() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  makeLayers();
   computeScale();
 }
 
-// D 키: 확인 모드 켜기/끄기
 function keyPressed() {
   if (key === "d" || key === "D") debugView = !debugView;
 }
