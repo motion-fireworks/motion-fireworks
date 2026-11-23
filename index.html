@@ -344,32 +344,110 @@ function makeLayers() {
   skyBlur.filter(BLUR, 3);
 }
 
-// 하늘: 짙은 남색 → 지평선 쪽은 도시 불빛에 물든 따뜻한 빛, 별과 달
+// 하늘: 맑은 밤하늘의 짙은 청색 → 지평선은 도시 불빛(나트륨등)에 물든 주황빛
+//       + 별, 실제 같은 달, 도시 불빛을 아래에서 받은 구름
 function drawSky() {
   sky.colorMode(RGB);
+  colorMode(RGB);              // color()는 메인 캔버스 색 모드를 따르므로 잠시 RGB로
   sky.noStroke();
-  let c1 = color(3, 5, 16), c2 = color(22, 20, 44), c3 = color(72, 46, 52);
-  for (let y = 0; y < GROUND; y += 2) {
-    let t = y / GROUND;
-    let c = t < 0.6 ? lerpColor(c1, c2, t / 0.6) : lerpColor(c2, c3, (t - 0.6) / 0.4);
+  let stops = [
+    [0.0,  color(1, 3, 12)],
+    [0.45, color(6, 12, 32)],
+    [0.75, color(22, 30, 58)],
+    [0.92, color(70, 55, 62)],
+    [1.0,  color(120, 78, 52)]
+  ];
+  for (let y = 0; y < GROUND; y++) {
+    let t = y / GROUND, c = stops[0][1];
+    for (let i = 1; i < stops.length; i++) {
+      if (t <= stops[i][0]) {
+        let a0 = stops[i - 1], a1 = stops[i];
+        c = lerpColor(a0[1], a1[1], (t - a0[0]) / (a1[0] - a0[0]));
+        break;
+      }
+    }
     sky.fill(c);
-    sky.rect(0, y, width, 2);
+    sky.rect(0, y, width, 1);
   }
-  for (let i = 0; i < 140; i++) {          // 희미한 별
-    let y = random(GROUND * 0.55);
-    sky.fill(255, 255, 255, random(30, 120) * (1 - y / (GROUND * 0.55)));
-    sky.circle(random(width), y, random(0.8, 1.8));
+
+  // 별: 대부분 희미하고, 지평선 쪽은 도시 불빛에 묻혀 안 보임
+  for (let i = 0; i < 160; i++) {
+    let y = pow(random(), 1.6) * GROUND * 0.6;
+    let fade = 1 - y / (GROUND * 0.6);
+    let b = random() < 0.08 ? random(160, 230) : random(25, 110);
+    let warm = random([[255, 255, 255], [255, 240, 220], [220, 230, 255]]);
+    sky.fill(warm[0], warm[1], warm[2], b * fade);
+    sky.circle(random(width), y, b > 150 ? 1.8 : random(0.6, 1.2));
   }
-  let mx = width * 0.88, my = GROUND * 0.14, mr = max(12, height * 0.022);
-  for (let g = 6; g > 0; g--) {            // 달무리
-    sky.fill(200, 210, 230, 6);
-    sky.circle(mx, my, mr * 2 * (1 + g * 0.6));
+
+  colorMode(HSB);
+  drawMoon(width * 0.86, GROUND * 0.16, max(14, height * 0.032));
+  drawClouds();
+}
+
+// 달: 가장자리가 어두워지는 구(림 다크닝) + 바다(어두운 무늬) + 크레이터 질감 + 살짝 이지러진 위상
+function drawMoon(mx, my, mr) {
+  let ctx = sky.drawingContext;
+  let g = ctx.createRadialGradient(mx, my, mr * 0.9, mx, my, mr * 9);   // 달빛 번짐
+  g.addColorStop(0, "rgba(205,215,235,0.28)");
+  g.addColorStop(0.25, "rgba(160,175,210,0.10)");
+  g.addColorStop(1, "rgba(120,140,190,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(mx - mr * 9, my - mr * 9, mr * 18, mr * 18);
+
+  let d = ceil(mr * 2) + 2;
+  let img = createImage(d, d);
+  img.loadPixels();
+  let lx = 0.42, lz = 0.91;                       // 빛 방향 → 약간 이지러진 달
+  for (let j = 0; j < d; j++) {
+    for (let i = 0; i < d; i++) {
+      let nx = (i - d / 2) / mr, ny = (j - d / 2) / mr;
+      let r = sqrt(nx * nx + ny * ny);
+      let idx = 4 * (j * d + i);
+      if (r > 1.02) { img.pixels[idx + 3] = 0; continue; }
+      let nz = sqrt(max(0, 1 - r * r));
+      let lit = constrain((nx * lx + nz * lz + 0.08) * 3, 0, 1);      // 명암 경계
+      let limb = 0.62 + 0.38 * nz;                                     // 가장자리 어둡게
+      let maria = noise(nx * 1.6 + 30, ny * 1.6 + 30);                 // 큰 어두운 무늬(바다)
+      let mare = maria > 0.5 ? map(maria, 0.5, 0.65, 0, 0.32, true) : 0;
+      let crater = noise(nx * 9 + 70, ny * 9 + 70) * 0.18;             // 잔 질감
+      let v = limb * (1 - mare - crater * 0.6);
+      let k = lit * v + (1 - lit) * 0.04;                              // 어두운 쪽은 지구조 빛만 희미하게
+      img.pixels[idx]     = 238 * k;
+      img.pixels[idx + 1] = 234 * k;
+      img.pixels[idx + 2] = 222 * k;
+      img.pixels[idx + 3] = 255 * constrain((1.02 - r) * mr, 0, 1);  // 가장자리 부드럽게
+    }
   }
-  sky.fill(235, 232, 215);
-  sky.circle(mx, my, mr * 2);
-  sky.fill(210, 205, 190, 120);
-  sky.circle(mx - mr * 0.3, my + mr * 0.2, mr * 0.5);
-  sky.circle(mx + mr * 0.35, my - mr * 0.25, mr * 0.3);
+  img.updatePixels();
+  sky.image(img, mx - d / 2, my - d / 2);
+}
+
+// 구름: 노이즈로 만든 얇은 층운. 아래쪽은 도시 불빛을 받아 따뜻하게 물듦
+function drawClouds() {
+  let sc = 2;                                     // 절반 해상도로 계산 → 부드럽고 빠름
+  let cw = ceil(width / sc), chh = ceil(GROUND * 0.8 / sc);
+  let img = createImage(cw, chh);
+  img.loadPixels();
+  noiseDetail(5, 0.5);
+  let seed = random(1000);
+  for (let y = 0; y < chh; y++) {
+    let t = y / chh;
+    let band = sin(t * PI) * 0.9 + 0.1;           // 하늘 중간 높이에 구름이 많음
+    let cr = lerp(28, 120, t * t), cg = lerp(32, 86, t * t), cb = lerp(52, 76, t * t);
+    for (let x = 0; x < cw; x++) {
+      let n = noise(seed + x * 0.006, y * 0.022);
+      let dens = constrain((n - 0.5) / 0.22, 0, 1) * band;
+      let idx = 4 * (y * cw + x);
+      img.pixels[idx] = cr;
+      img.pixels[idx + 1] = cg;
+      img.pixels[idx + 2] = cb;
+      img.pixels[idx + 3] = dens * 150;
+    }
+  }
+  img.updatePixels();
+  noiseDetail(4, 0.5);
+  sky.image(img, 0, 0, width, chh * sc);
 }
 
 // 먼 건물일수록 지평선 쪽 공기색으로 덮어서 흐리게 (대기원근법)
@@ -378,7 +456,7 @@ function haze(a) {
   let span = GROUND * 0.6;
   for (let y = GROUND - span; y < GROUND; y += 3) {
     let t = (y - (GROUND - span)) / span;
-    sky.fill(300, 30, 26, a * t);
+    sky.fill(225, 25, 24, a * t);
     sky.rect(0, y, width, 3);
   }
 }
