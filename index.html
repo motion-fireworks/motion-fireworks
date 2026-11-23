@@ -40,7 +40,8 @@ let skyBlur;              // 물에 비칠 흐린 야경
 let fx;                   // 불꽃 레이어 (매 프레임 그림)
 let GROUND;               // 호수 수면 높이
 let flash = 0, flashHue = 0;  // 불꽃이 터질 때 하늘이 밝아지는 효과
-let moonImg;              // 달 사진 (moon.png)
+let moonImg;
+let PD = 1;                // 화면 픽셀 밀도              // 달 사진 (moon.png)
 
 // ===== 불꽃 설정 =====
 const BURST_COUNT = 90;     // 한 번 터질 때 불꽃 알갱이 수
@@ -68,7 +69,8 @@ function preload() {
 }
 
 function setup() {
-  pixelDensity(1);
+  PD = min(2, displayDensity());   // 고해상도 화면에서도 선명하게 (최대 2배)
+  pixelDensity(PD);
   createCanvas(windowWidth, windowHeight);
   video = createCapture({ video: { width: 640, height: 480 }, audio: false });
   video.hide();
@@ -311,7 +313,7 @@ function makeLayers() {
   fx.strokeCap(ROUND);
 
   sky = createGraphics(width, height);
-  sky.pixelDensity(1);
+  sky.pixelDensity(PD);
 
   GROUND = height * 0.84;
   let W = width, H = GROUND;
@@ -323,7 +325,7 @@ function makeLayers() {
   sky.colorMode(HSB);
 
   // 여의도 3D 모델을 렌더링해서 배경에 그림 (city3d.js)
-  sky.drawingContext.drawImage(renderCity3D(width, height, GROUND), 0, 0);
+  sky.drawingContext.drawImage(renderCity3D(width, height, GROUND, PD), 0, 0, width, height);
 
   // 한강공원 나무숲
   treeLine();
@@ -339,7 +341,7 @@ function makeLayers() {
 // 빛 번짐(블룸): 밝은 창과 조명 주변으로 빛이 은은하게 퍼지게 → 카메라로 찍은 야경 느낌
 // 필름 그레인: 아주 약한 노이즈로 CG 특유의 매끈함을 줄임
 function bloomAndGrain() {
-  for (let [scale, alpha, cut] of [[4, 0.45, 80], [10, 0.3, 65]]) {
+  for (let [scale, alpha, cut] of [[4, 0.3, 95], [10, 0.2, 80]]) {
     let bl = sky.get(0, 0, width, GROUND);
     bl.resize(ceil(width / scale), ceil(GROUND / scale));
     bl.loadPixels();
@@ -358,7 +360,7 @@ function bloomAndGrain() {
   sky.noTint();
   sky.loadPixels();
   for (let i = 0; i < sky.pixels.length; i += 4) {
-    let n = (random() - 0.5) * 7;
+    let n = (random() - 0.5) * 3;
     sky.pixels[i] += n; sky.pixels[i + 1] += n; sky.pixels[i + 2] += n;
   }
   sky.updatePixels();

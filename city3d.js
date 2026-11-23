@@ -9,7 +9,7 @@
 function makeWinTex(widthM, heightM, style) {
   let cols = Math.max(2, Math.round(widthM / (style === "apt" ? 4.5 : 3.2)));
   let rows = Math.max(3, Math.round(heightM / 3.8));
-  let cw = 8, rh = 10;
+  let cw = 12, rh = 14;
   let c = document.createElement("canvas");
   c.width = Math.min(1024, cols * cw);
   c.height = Math.min(2048, rows * rh);
@@ -35,7 +35,7 @@ function makeWinTex(widthM, heightM, style) {
       let run = 1 + Math.floor(Math.random() * 4);
       let lit = Math.random() < p;
       for (let k = 0; k < run && cc < cols; k++, cc++) {
-        let a = lit ? 0.55 + Math.random() * 0.45 : 0.06;
+        let a = lit ? 0.75 + Math.random() * 0.25 : 0.05;
         g.fillStyle = lit ? `rgba(${tone},${a})` : "rgba(120,140,170,0.07)";
         g.fillRect(cc * cw + 1, r * rh + 2, cw - 2, rh - 4);
       }
@@ -46,7 +46,7 @@ function makeWinTex(widthM, heightM, style) {
     }
   }
   let t = new THREE.CanvasTexture(c);
-  t.anisotropy = 4;
+  t.anisotropy = 16;                               // 비스듬히 보이는 옆면 창문도 또렷하게
   return t;
 }
 
@@ -153,14 +153,14 @@ function assembly3D(scene, x, z) {
   scene.add(ribs);
 }
 
-function renderCity3D(w, h, groundY) {
+function renderCity3D(w, h, groundY, pd = 1) {
   let renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(1);
+  renderer.setPixelRatio(pd);
   renderer.setSize(w, h);
   renderer.setClearColor(0x000000, 0);
 
   let scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x141626, 1800, 5200);  // 먼 건물일수록 밤공기에 흐려짐
+  scene.fog = new THREE.Fog(0x141626, 3200, 9000);  // 아주 먼 건물만 살짝 흐려짐
 
   let cam = new THREE.PerspectiveCamera(22, w / h, 10, 8000);
   cam.position.set(-200, 200, 1750);                 // 강 건너 북쪽, 살짝 높은 곳에서 비스듬히
@@ -217,8 +217,8 @@ function renderCity3D(w, h, groundY) {
   let v = new THREE.Vector3(0, 0, 230).project(cam);
   let baseY = (1 - v.y) / 2 * h;
   let out = document.createElement("canvas");
-  out.width = w; out.height = h;
-  out.getContext("2d").drawImage(renderer.domElement, 0, groundY - baseY);
+  out.width = w * pd; out.height = h * pd;
+  out.getContext("2d").drawImage(renderer.domElement, 0, (groundY - baseY) * pd);
   renderer.dispose();
   renderer.forceContextLoss();
   return out;
