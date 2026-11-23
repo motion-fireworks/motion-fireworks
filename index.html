@@ -315,7 +315,7 @@ function makeLayers() {
   let W = width, H = GROUND;
   VPX = W * 0.56;          // 소실점: 화면 가운데 살짝 오른쪽
   VPY = GROUND - H * 0.12; // 눈높이: 수면보다 조금 위 → 낮은 건물은 지붕이 보임
-  FOCAL = W * 0.8;      // 작을수록 입체감(원근)이 강해짐
+  FOCAL = W * 0.6;      // 작을수록 입체감(원근)이 강해짐
 
   drawSky();
   sky.colorMode(HSB);
@@ -495,6 +495,88 @@ function genFloors(top, bottom) {
   return arr;
 }
 
+// ---------- 사실적인 유리 외벽 칠하기 ----------
+function hsbStr(h, sat, b, a = 1) {
+  let c = color(h, sat, b);
+  return `rgba(${round(red(c))},${round(green(c))},${round(blue(c))},${a})`;
+}
+
+function polyPath(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+}
+
+// 앞면: 위쪽은 하늘이 비친 유리, 가운데는 어두운 유리, 아래는 거리 조명을 받은 따뜻한 빛
+//       + 가로 방향 명암(한쪽 모서리가 더 어두움)
+function glassFront(pts, x0, x1, top, bottom, dim, darkLeft) {
+  let ctx = sky.drawingContext;
+  let g = ctx.createLinearGradient(0, top, 0, bottom);
+  g.addColorStop(0, hsbStr(FACADE[0], FACADE[1] * 0.8, 12 + 10 * dim));
+  g.addColorStop(0.35, hsbStr(FACADE[0], FACADE[1], 6 + 6 * dim));
+  g.addColorStop(0.85, hsbStr(FACADE[0], FACADE[1], 5 + 5 * dim));
+  g.addColorStop(1, hsbStr(30, 50, 14 + 12 * dim));
+  ctx.fillStyle = g;
+  polyPath(ctx, pts);
+  ctx.fill();
+  let hgr = ctx.createLinearGradient(x0, 0, x1, 0);
+  hgr.addColorStop(darkLeft ? 0 : 1, "rgba(0,0,0,0.35)");
+  hgr.addColorStop(darkLeft ? 1 : 0, "rgba(0,0,0,0)");
+  ctx.fillStyle = hgr;
+  polyPath(ctx, pts);
+  ctx.fill();
+}
+
+// 옆면: 앞면보다 어둡고, 위쪽만 살짝 하늘빛
+function glassSide(pts, top, bottom, dim) {
+  let ctx = sky.drawingContext;
+  let g = ctx.createLinearGradient(0, top, 0, bottom);
+  g.addColorStop(0, hsbStr(FACADE[0], FACADE[1] * 0.8, 7 + 6 * dim));
+  g.addColorStop(0.4, hsbStr(FACADE[0], FACADE[1], 3 + 4 * dim));
+  g.addColorStop(1, hsbStr(30, 40, 6 + 6 * dim));
+  ctx.fillStyle = g;
+  polyPath(ctx, pts);
+  ctx.fill();
+}
+
+// 한 층의 창 띠: 사무실처럼 여러 칸이 이어져 켜지고, 칸 사이에 세로 창틀(멀리언)
+function floorStrip(x0, x1, y, fl, dim) {
+  let win = winSize(), colW = win * 1.3, hgt = win * 1.15;
+  let xx = x0;
+  sky.noStroke();
+  while (xx < x1 - win * 0.5) {
+    let xe = min(x1, xx + colW * (1 + floor(random(5))));
+    if (random() < fl.p) {
+      sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * (0.25 + 0.7 * dim) * random(0.7, 1));
+      sky.rect(xx, y, xe - xx, hgt);
+      sky.fill(fl.tone[0], fl.tone[1] * 0.5, 100, 0.12 * dim);       // 천장 조명이 더 밝은 윗부분
+      sky.rect(xx, y, xe - xx, hgt * 0.3);
+    }
+    xx = xe;
+  }
+  sky.fill(FACADE[0], FACADE[1], 3 + 2 * dim, 0.8);                 // 창틀
+  for (let m = x0; m < x1; m += colW) sky.rect(m, y, max(1, win * 0.2), hgt);
+  sky.fill(FACADE[0], FACADE[1] * 0.5, 14 + 10 * dim, 0.5);         // 층 슬래브 선
+  sky.rect(x0, y + hgt + win * 0.2, x1 - x0, 1);
+}
+
+// 옆면의 창 띠 (원근에 맞춰 사다리꼴로)
+function sideStrip(xe, y, D, fl, dim) {
+  let win = winSize(), colW = win * 1.3, hgt = win * 1.15;
+  let z = win * 0.5;
+  sky.noStroke();
+  while (z < D - win * 0.5) {
+    let ze = min(D - win * 0.3, z + colW * (1 + floor(random(4))));
+    if (random() < fl.p) {
+      sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * 0.6 * dim * random(0.6, 1));
+      let a = P(xe, y, z), b = P(xe, y, ze), c = P(xe, y + hgt, ze), d = P(xe, y + hgt, z);
+      sky.quad(a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1]);
+    }
+    z = ze;
+  }
+}
+
 // 직육면체 건물 하나: 옆면 → (낮은 건물이면 지붕 윗면) → 앞면 순서로 그림
 function prism(x, top, w, bottom, dim, D, floors) {
   floors = floors || genFloors(top, bottom);
@@ -503,67 +585,34 @@ function prism(x, top, w, bottom, dim, D, floors) {
   else if (x > VPX) edge = x;             // 소실점 오른쪽 건물 → 왼쪽 옆면이 보임
   if (edge !== null) sideFace(edge, top, bottom, D, dim, floors);
   if (top > VPY) topFace(x, top, w, D, dim);
-  facade(x, top, w, bottom - top, dim);
-  windowsGrid(x, w, dim, () => w, floors);
+  glassFront([[x, top], [x + w, top], [x + w, bottom], [x, bottom]], x, x + w, top, bottom, dim, edge === x);
+  for (let fl of floors) floorStrip(x + winSize() * 0.6, x + w - winSize() * 0.6, fl.y, fl, dim);
+  edgeLights(x, top, w, bottom, dim, edge);
+}
+
+// 모서리 하이라이트: 지붕선과, 옆면과 맞닿은 모서리
+function edgeLights(x, top, w, bottom, dim, edge) {
+  sky.noStroke();
+  sky.fill(FACADE[0], FACADE[1] * 0.5, 20 + 15 * dim);
+  sky.rect(x, top, w, 1);
+  if (edge !== null) {
+    sky.fill(FACADE[0], FACADE[1] * 0.4, 16 + 14 * dim, 0.8);
+    sky.rect(edge === x ? x : x + w - 1, top, 1, bottom - top);
+  }
 }
 
 function sideFace(xe, top, bottom, D, dim, floors) {
   let a = P(xe, top, D), b = P(xe, bottom, D);
-  sky.noStroke();
-  sky.fill(FACADE[0], FACADE[1], 3 + 4 * dim);        // 옆면은 앞면보다 어둡게
-  sky.quad(xe, top, a[0], a[1], b[0], b[1], xe, bottom);
-  sky.stroke(220, 15, 12 + 10 * dim);     // 모서리 선
-  sky.strokeWeight(1);
-  sky.line(xe, top, xe, bottom);
-  sky.line(xe, top, a[0], a[1]);
-  sky.noStroke();
-  if (dim < 0.5) return;                  // 먼 건물은 옆면 창문 생략
-  let win = winSize(), colW = win * 1.3, m = win * 0.7;
-  for (let fl of floors) {
-    for (let z = m; z < D - m - win; z += colW) {
-      if (random() < fl.p) sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * 0.6 * dim * random(0.6, 1));
-      else sky.fill(220, 35, 6 + 3 * dim);
-      let p1 = P(xe, fl.y, z), p2 = P(xe, fl.y, z + win);
-      let p3 = P(xe, fl.y + win * 1.1, z + win), p4 = P(xe, fl.y + win * 1.1, z);
-      sky.quad(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]);
-    }
-  }
+  glassSide([[xe, top], [a[0], a[1]], [b[0], b[1]], [xe, bottom]], top, bottom, dim);
+  if (dim < 0.5) return;                  // 먼 건물은 옆면 창 생략
+  for (let fl of floors) sideStrip(xe, fl.y, D, fl, dim);
 }
 
 function topFace(x, top, w, D, dim) {
   let a = P(x, top, D), b = P(x + w, top, D);
   sky.noStroke();
-  sky.fill(225, 25, 8 + 6 * dim);
+  sky.fill(FACADE[0], FACADE[1] * 0.6, 8 + 6 * dim);
   sky.quad(x, top, x + w, top, b[0], b[1], a[0], a[1]);
-}
-
-// 앞면: 한쪽이 살짝 밝은 외벽 + 위 모서리 하이라이트
-function facade(x, top, w, h, dim) {
-  sky.noStroke();
-  let base = 5 + 6 * dim;
-  for (let i = 0; i < w; i += 2) {
-    sky.fill(FACADE[0], FACADE[1], base * (0.7 + 0.6 * (i / w)));
-    sky.rect(x + i, top, min(2, w - i), h);
-  }
-  sky.fill(220, 10, 15 + 12 * dim);
-  sky.rect(x, top, w, 1);
-}
-
-// 앞면 창문 격자. widthAt(y)는 그 높이에서 건물 폭 (곡면 건물용)
-function windowsGrid(x, w, dim, widthAt, floors) {
-  let win = winSize(), colW = win * 1.3, m = win * 0.7;
-  sky.noStroke();
-  for (let fl of floors) {
-    let ww = widthAt(fl.y);
-    for (let xx = x + m; xx < x + ww - m - win; xx += colW) {
-      if (random() < fl.p) {
-        sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * (0.2 + 0.7 * dim) * random(0.6, 1));
-      } else {
-        sky.fill(220, 35, 9 + 5 * dim);   // 꺼진 창: 어두운 유리
-      }
-      sky.rect(xx, fl.y, win, win * 1.1);
-    }
-  }
 }
 
 // 한 줄로 늘어선 빌딩들 (바깥쪽부터 그려야 가운데 건물이 옆면을 자연스럽게 가림)
@@ -616,57 +665,51 @@ function withFacade(h, sat, fn) { let old = FACADE; FACADE = [h, sat]; fn(); FAC
 function shapedTower(cx, top, hwAt, D, dim, tones) {
   let bottom = GROUND;
   let hwB = hwAt(bottom);
-  let edgeX = null;
+  let edgeX = null, darkLeft = false;
   if (cx + hwB < VPX) edgeX = (y) => cx + hwAt(y);
-  else if (cx - hwB > VPX) edgeX = (y) => cx - hwAt(y);
+  else if (cx - hwB > VPX) { edgeX = (y) => cx - hwAt(y); darkLeft = true; }
 
-  sky.noStroke();
   if (edgeX) {                                   // 옆면
-    sky.fill(FACADE[0], FACADE[1], 3 + 4 * dim);
-    sky.beginShape();
-    for (let y = top; y <= bottom; y += 3) sky.vertex(edgeX(y), y);
-    for (let y = bottom; y >= top; y -= 3) { let q = P(edgeX(y), y, D); sky.vertex(q[0], q[1]); }
-    sky.endShape(CLOSE);
+    let pts = [];
+    for (let y = top; y <= bottom; y += 3) pts.push([edgeX(y), y]);
+    for (let y = bottom; y >= top; y -= 3) pts.push(P(edgeX(y), y, D));
+    glassSide(pts, top, bottom, dim);
   }
-  for (let y = top; y < bottom; y += 2) {        // 앞면 (아래로 갈수록 살짝 밝게)
-    let hw = hwAt(y);
-    sky.fill(FACADE[0], FACADE[1], (5 + 6 * dim) * (0.8 + 0.4 * (y - top) / (bottom - top)));
-    sky.rect(cx - hw, y, hw * 2, 2);
-  }
-  let win = winSize(), colW = win * 1.3;
-  for (let fl of genFloors(top, bottom)) {       // 창문
-    let hw = hwAt(fl.y) - win * 0.7;
-    let tone = tones ? random(tones) : fl.tone;
-    let p = tones ? max(fl.p, 0.55) : fl.p;
-    for (let xx = cx - hw; xx < cx + hw - win; xx += colW) {
-      if (random() < p) sky.fill(tone[0], tone[1], tone[2] * (0.25 + 0.7 * dim) * random(0.7, 1));
-      else sky.fill(FACADE[0], FACADE[1], 9 + 5 * dim);
-      sky.rect(xx, fl.y, win, win * 1.1);
-    }
+  let pts = [];                                  // 앞면
+  for (let y = top; y <= bottom; y += 3) pts.push([cx - hwAt(y), y]);
+  for (let y = bottom; y >= top; y -= 3) pts.push([cx + hwAt(y), y]);
+  glassFront(pts, cx - hwB, cx + hwB, top, bottom, dim, darkLeft);
+  for (let fl of genFloors(top, bottom)) {       // 창 띠
+    if (tones) { fl.tone = random(tones); fl.p = max(fl.p, 0.6); }
+    let hw = hwAt(fl.y) - winSize() * 0.6;
+    floorStrip(cx - hw, cx + hw, fl.y, fl, dim);
   }
 }
 
 // 지붕이 비스듬히 잘린 건물 (IFC, FKI타워처럼). topL = 왼쪽 꼭대기, topR = 오른쪽 꼭대기
 function wedgeTower(x, w, topL, topR, dim, D) {
   let floors = genFloors(min(topL, topR), GROUND);
-  if (x + w < VPX) sideFace(x + w, topR, GROUND, D, dim, floors.filter(f => f.y > topR + 3));
-  else if (x > VPX) sideFace(x, topL, GROUND, D, dim, floors.filter(f => f.y > topL + 3));
-  sky.noStroke();
-  sky.fill(FACADE[0], FACADE[1], 6 + 6 * dim);
-  sky.quad(x, topL, x + w, topR, x + w, GROUND, x, GROUND);
-  let win = winSize(), colW = win * 1.3, m = win * 0.7;
+  let edge = null;
+  if (x + w < VPX) { edge = x + w; sideFace(x + w, topR, GROUND, D, dim, floors.filter(f => f.y > topR + 3)); }
+  else if (x > VPX) { edge = x; sideFace(x, topL, GROUND, D, dim, floors.filter(f => f.y > topL + 3)); }
+  glassFront([[x, topL], [x + w, topR], [x + w, GROUND], [x, GROUND]], x, x + w, min(topL, topR), GROUND, dim, edge === x);
+  let win = winSize();
   for (let fl of floors) {
-    for (let xx = x + m; xx < x + w - m - win; xx += colW) {
-      if (fl.y < lerp(topL, topR, (xx + win - x) / w) + win) continue;   // 비스듬한 지붕 위로는 창 없음
-      if (random() < fl.p) sky.fill(fl.tone[0], fl.tone[1], fl.tone[2] * (0.25 + 0.7 * dim) * random(0.6, 1));
-      else sky.fill(FACADE[0], FACADE[1], 9 + 5 * dim);
-      sky.rect(xx, fl.y, win, win * 1.1);
-    }
+    // 비스듬한 지붕 아래쪽만 창을 그림
+    let xa = x + win * 0.6, xb = x + w - win * 0.6;
+    let need = fl.y - win;
+    if (topR > topL) xb = min(xb, x + w * (need - topL) / (topR - topL));   // 오른쪽이 낮은 지붕
+    if (topL > topR) xa = max(xa, x + w * (topL - need) / (topL - topR));   // 왼쪽이 낮은 지붕
+    if (xb - xa > win) floorStrip(xa, xb, fl.y, fl, dim);
   }
   sky.stroke(200, 15, 55);                        // 비스듬한 지붕선의 조명
   sky.strokeWeight(1.5);
   sky.line(x, topL, x + w, topR);
   sky.noStroke();
+  if (edge !== null) {
+    sky.fill(FACADE[0], FACADE[1] * 0.4, 30, 0.8);
+    sky.rect(edge === x ? x : x + w - 1, edge === x ? topL : topR, 1, GROUND - (edge === x ? topL : topR));
+  }
 }
 
 // ---- 63빌딩: 위로 갈수록 좁아지는 금빛 유리 타워 ----
