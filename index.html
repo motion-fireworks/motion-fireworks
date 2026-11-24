@@ -1055,35 +1055,61 @@ function updateCamSize() {
   }
 }
 
+// 손목 하나 처리
+//  가만히 있을 때 AI 인식이 미세하게 흔들려도 터지지 않도록:
+//  1) 위치를 부드럽게 다듬고(떨림 제거)
+//  2) 한 프레임이 아니라 최근 0.15초 동안 실제로 이동한 거리로 속도를 재고
+//  3) 그 속도가 기준을 넘는 상태가 2번 연속일 때만 터뜨림
+const MOVE_WINDOW = 150;   // 속도를 재는 시간 폭 (ms)
+const STILL_SMOOTH = 0.45; // 위치 다듬기 정도 (작을수록 떨림을 더 많이 걸러냄)
+let trails = {};           // 손목별 최근 위치 기록
+let moveStreak = {};       // 손목별 '움직임' 연속 횟수
+
 function handle(point, key, hue) {
   if (!point || point.confidence < MIN_CONF) {
     delete prevPts[key];
+    delete trails[key];
+    moveStreak[key] = 0;
     return;
   }
 
-  let x = offX + (camW - point.x) * s;
-  let y = offY + point.y * s - Y_UP;
-
-  sparkler(x, y);
-
+  // 1) 떨림 제거: 이전 위치와 섞어서 부드럽게
   let prev = prevPts[key];
-  if (prev) {
-    let speed = dist(point.x, point.y, prev.x, prev.y);
-    let now = millis();
-    if (speed > SPEED_MIN && now - (lastPop[key] || 0) > COOLDOWN) {
-      lastPop[key] = now;
-      burst(x, y, hue);
+  let px = prev ? lerp(prev.x, point.x, STILL_SMOOTH) : point.x;
+  let py = prev ? lerp(prev.y, point.y, STILL_SMOOTH) : point.y;
+  prevPts[key] = { x: px, y: py };
 
-      if (SONG_MODE) {
-        playChime(nextSongNote());
-      } else {
-        let idx = floor(map(point.y, camH, 0, 0, SCALE.length));
-        idx = constrain(idx, 0, SCALE.length - 1);
-        playChime(SCALE[idx]);
-      }
+  let x = offX + (camW - px) * s;
+  let y = offY + py * s - Y_UP;
+
+  let now = millis();
+  let tr = trails[key] || (trails[key] = []);
+  tr.push({ x: px, y: py, t: now });
+  while (tr.length > 2 && now - tr[1].t > MOVE_WINDOW) tr.shift();
+
+  // 2) 최근 MOVE_WINDOW 동안 움직인 거리 → 프레임당 속도로 환산 (기존 SPEED_MIN 기준 그대로 사용)
+  let old = tr[0];
+  let dt = max(1, now - old.t);
+  let speed = dist(px, py, old.x, old.y) / dt * (1000 / 60);
+  let moving = speed > SPEED_MIN && dt > MOVE_WINDOW * 0.5;
+  moveStreak[key] = moving ? (moveStreak[key] || 0) + 1 : 0;
+
+  // 손목 불티: 움직일 때는 활발하게, 가만히 있으면 아주 가끔만
+  if (moving || frameCount % 4 === 0) sparkler(x, y);
+
+  // 3) 움직임이 2번 연속 확인되면 펑!
+  if (moveStreak[key] >= 2 && now - (lastPop[key] || 0) > COOLDOWN) {
+    lastPop[key] = now;
+    burst(x, y, hue);
+
+    if (SONG_MODE) {
+      playChime(nextSongNote());
+    } else {
+      let idx = floor(map(py, camH, 0, 0, SCALE.length));
+      idx = constrain(idx, 0, SCALE.length - 1);
+      playChime(SCALE[idx]);
     }
   }
-  prevPts[key] = { x: point.x, y: point.y };
 }
 
 function playChime(freq) {
